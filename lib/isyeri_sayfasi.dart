@@ -39,7 +39,7 @@ class IsyeriSayfasi extends StatelessWidget {
                 unselectedLabelColor: Colors.white70,
                 tabs: [
                   Tab(icon: Icon(Icons.business_outlined), text: 'Genel'),
-                  Tab(icon: Icon(Icons.contacts_outlined), text: 'Kişiler'),
+                  Tab(icon: Icon(Icons.contacts_outlined), text: 'Detay'),
                   Tab(icon: Icon(Icons.sticky_note_2_outlined), text: 'Notlar'),
                 ],
               ),

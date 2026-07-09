@@ -1,9 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'main.dart';
+import 'pdf_goruntuleyici.dart';
+import 'donem_ek_belgeler.dart';
 
 const Map<String, List<String>> presetKategoriler = {
   'ÜCRETLER': ['Ücret Zammı', 'İkramiye (Yıllık)', 'Promosyon'],
@@ -91,6 +94,33 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
       }
     } finally {
       if (mounted) setState(() => _yukleniyor = null);
+    }
+  }
+
+  Future<void> _indir(String tur, String? ad) async {
+    final dosyaAdi = (ad == null || ad.isEmpty) ? 'belge' : ad;
+    try {
+      final yol = await FilePicker.saveFile(
+        dialogTitle: 'Nereye kaydedilsin?',
+        fileName: dosyaAdi,
+      );
+      if (yol == null) return;
+      final bytes = await FirebaseStorage.instance
+          .ref(_depoYolu(tur))
+          .getData(200 * 1024 * 1024);
+      if (bytes == null) throw 'Dosya okunamadı';
+      await File(yol).writeAsBytes(bytes);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('İndirildi: $dosyaAdi')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('İndirme hatası: $e')));
+      }
     }
   }
 
@@ -527,7 +557,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
             const SizedBox(height: 12),
             _belgeKarti(
               tur: 'pdf',
-              baslik: 'İmzalı Taranmış PDF',
+              baslik: 'İmzalı Sözleşme',
               ikon: Icons.picture_as_pdf,
               renk: Colors.red,
               url: veri['pdfUrl'] as String?,
@@ -536,12 +566,14 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
             const SizedBox(height: 12),
             _belgeKarti(
               tur: 'word',
-              baslik: 'Word Hali',
+              baslik: 'TİS Word Belgesi',
               ikon: Icons.description,
               renk: Colors.blue,
               url: veri['wordUrl'] as String?,
               ad: veri['wordAd'] as String?,
             ),
+            const SizedBox(height: 28),
+            DonemEkBelgeler(isyeriId: widget.isyeriId, donemId: widget.donemId),
             const SizedBox(height: 28),
             const Text(
               'Sözleşme Bilgileri',
@@ -961,6 +993,11 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
                     tooltip: 'Aç',
                     icon: const Icon(Icons.open_in_new, color: AppRenk.indigo),
                     onPressed: () => _ac(url),
+                  ),
+                  IconButton(
+                    tooltip: 'İndir',
+                    icon: const Icon(Icons.download, color: AppRenk.emerald),
+                    onPressed: () => _indir(tur, ad),
                   ),
                   IconButton(
                     tooltip: 'Değiştir',

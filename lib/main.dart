@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'isyeri_sayfasi.dart';
+import 'ana_kabuk.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -10,7 +11,6 @@ Future<void> main() async {
   runApp(const SozlesmeAsistaniApp());
 }
 
-// Renkleri tek yerden yönetiyoruz; sonra her ekranda aynısını kullanacağız.
 class AppRenk {
   static const indigo = Color(0xFF6366F1);
   static const amber = Color(0xFFF59E0B);
@@ -31,7 +31,7 @@ class SozlesmeAsistaniApp extends StatelessWidget {
         scaffoldBackgroundColor: AppRenk.arkaPlan,
         useMaterial3: true,
       ),
-      home: const AnaEkran(),
+      home: const AnaKabuk(),
     );
   }
 }
@@ -46,7 +46,6 @@ class AnaEkran extends StatefulWidget {
 class _AnaEkranState extends State<AnaEkran> {
   String _aramaMetni = '';
 
-  // Yeni işyeri ekleme penceresi
   Future<void> _isyeriEkle() async {
     final controller = TextEditingController();
     final ad = await showDialog<String>(
@@ -83,7 +82,6 @@ class _AnaEkranState extends State<AnaEkran> {
     }
   }
 
-  // İşyeri silme (onay isteyerek)
   Future<void> _isyeriSil(String id, String ad) async {
     final onay = await showDialog<bool>(
       context: context,
@@ -125,7 +123,6 @@ class _AnaEkranState extends State<AnaEkran> {
       ),
       body: Column(
         children: [
-          // Arama çubuğu
           Padding(
             padding: const EdgeInsets.all(16),
             child: TextField(
@@ -142,7 +139,6 @@ class _AnaEkranState extends State<AnaEkran> {
               ),
             ),
           ),
-          // İşyeri listesi (buluttan canlı gelir)
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -162,7 +158,6 @@ class _AnaEkranState extends State<AnaEkran> {
                   return _bosDurum();
                 }
 
-                // Arama filtresi
                 final liste = tumu.where((d) {
                   final ad = (d['ad'] as String).toLowerCase();
                   return ad.contains(_aramaMetni);
@@ -180,6 +175,8 @@ class _AnaEkranState extends State<AnaEkran> {
                     final belge = liste[i];
                     final ad = belge['ad'] as String;
                     final ilkHarf = ad.isNotEmpty ? ad[0].toUpperCase() : '?';
+                    final veri = belge.data() as Map<String, dynamic>;
+                    final logoUrl = (veri['logoUrl'] ?? '').toString();
 
                     return Card(
                       elevation: 0,
@@ -189,10 +186,15 @@ class _AnaEkranState extends State<AnaEkran> {
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: AppRenk.indigo,
-                          child: Text(
-                            ilkHarf,
-                            style: const TextStyle(color: Colors.white),
-                          ),
+                          backgroundImage: logoUrl.isEmpty
+                              ? null
+                              : NetworkImage(logoUrl),
+                          child: logoUrl.isEmpty
+                              ? Text(
+                                  ilkHarf,
+                                  style: const TextStyle(color: Colors.white),
+                                )
+                              : null,
                         ),
                         title: Text(
                           ad,
@@ -231,7 +233,6 @@ class _AnaEkranState extends State<AnaEkran> {
     );
   }
 
-  // Liste bomboşken gösterilen ekran
   Widget _bosDurum() {
     return Center(
       child: Column(

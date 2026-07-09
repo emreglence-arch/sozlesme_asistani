@@ -31,7 +31,7 @@ class DonemDetaySayfasi extends StatelessWidget {
             unselectedLabelColor: Colors.white70,
             tabs: [
               Tab(icon: Icon(Icons.info_outline), text: 'Bilgiler'),
-              Tab(icon: Icon(Icons.article_outlined), text: 'Maddeler'),
+              Tab(icon: Icon(Icons.article_outlined), text: 'TİS Metni'),
             ],
           ),
         ),
