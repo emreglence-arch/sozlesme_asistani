@@ -1,28 +1,22 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'main.dart';
-import 'pdf_goruntuleyici.dart';
-import 'donem_ek_belgeler.dart';
 
 const Map<String, List<String>> presetKategoriler = {
   'ÜCRETLER': ['Ücret Zammı', 'İkramiye (Yıllık)', 'Promosyon'],
-  'SOSYAL YARDIMLAR': [
-    'Aile (Aylık)',
-    'Yemek (Kart-Gün)',
-    'Yakacak (Yıllık)',
-    'Çocuk',
+  'SOSYAL HAK VE YARDIMLAR': [
+    'Aile',
+    'Yemek',
+    'Yakacak',
     'Evlenme',
     'Doğum',
-    'Bayram (İki Bayram Toplam)',
+    'Ramazan Bayramı',
+    'Kurban Bayramı',
   ],
-  'EĞİTİM': ['Ana-İlk', 'Orta Okul', 'Lise', 'Üniversite'],
+  'EĞİTİM YARDIMLARI': ['Ana-İlk Okul', 'Orta Okul', 'Lise', 'Üniversite'],
   'ÖLÜM': ['İşçi Vefat', 'İş Kazası', 'Eş/Çocuk', 'Anne/Baba'],
-  'HARCIRAH': ['0-10 Saat', '10-18 Saat', '18 Saat +'],
-  'DİĞER': ['Tabii Afet', 'Giyim Yardımı (Yıllık)'],
+  'HARCIRAH': [],
+  'DİĞER': [],
 };
 
 const Set<String> direktKategoriler = {'ÜCRETLER'};
@@ -42,7 +36,6 @@ class DonemBilgilerSekmesi extends StatefulWidget {
 }
 
 class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
-  String? _yukleniyor;
   int _seciliYil = 1;
 
   DocumentReference<Map<String, dynamic>> _donemRef() => FirebaseFirestore
@@ -52,99 +45,9 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
       .collection('donemler')
       .doc(widget.donemId);
 
-  String _depoYolu(String tur) =>
-      'sozlesmeler/${widget.isyeriId}/${widget.donemId}/$tur';
-
   bool _direkt(Map<String, dynamic> kategori) {
     final ad = (kategori['ad'] ?? '').toString().toUpperCase();
     return kategori['tip'] == 'direkt' || direktKategoriler.contains(ad);
-  }
-
-  // ---------- BELGE YÜKLEME ----------
-  Future<void> _yukle(String tur) async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: tur == 'pdf' ? ['pdf'] : ['doc', 'docx'],
-      withData: true,
-    );
-    if (result == null) return;
-    final secilen = result.files.first;
-    if (secilen.bytes == null) return;
-
-    setState(() => _yukleniyor = tur);
-    try {
-      final ref = FirebaseStorage.instance.ref(_depoYolu(tur));
-      String ct;
-      if (tur == 'pdf') {
-        ct = 'application/pdf';
-      } else if (secilen.name.toLowerCase().endsWith('.doc')) {
-        ct = 'application/msword';
-      } else {
-        ct =
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      }
-      await ref.putData(secilen.bytes!, SettableMetadata(contentType: ct));
-      final url = await ref.getDownloadURL();
-      await _donemRef().update({'${tur}Url': url, '${tur}Ad': secilen.name});
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Yükleme hatası: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _yukleniyor = null);
-    }
-  }
-
-  Future<void> _indir(String tur, String? ad) async {
-    final dosyaAdi = (ad == null || ad.isEmpty) ? 'belge' : ad;
-    try {
-      final yol = await FilePicker.saveFile(
-        dialogTitle: 'Nereye kaydedilsin?',
-        fileName: dosyaAdi,
-      );
-      if (yol == null) return;
-      final bytes = await FirebaseStorage.instance
-          .ref(_depoYolu(tur))
-          .getData(200 * 1024 * 1024);
-      if (bytes == null) throw 'Dosya okunamadı';
-      await File(yol).writeAsBytes(bytes);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('İndirildi: $dosyaAdi')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('İndirme hatası: $e')));
-      }
-    }
-  }
-
-  Future<void> _ac(String url) async {
-    final uri = Uri.parse(url);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Dosya açılamadı')));
-      }
-    }
-  }
-
-  Future<void> _belgeSil(String tur) async {
-    final onay = await _onayDialog('Belgeyi sil', 'Bu belge silinsin mi?');
-    if (onay != true) return;
-    try {
-      await FirebaseStorage.instance.ref(_depoYolu(tur)).delete();
-    } catch (_) {}
-    await _donemRef().update({
-      '${tur}Url': FieldValue.delete(),
-      '${tur}Ad': FieldValue.delete(),
-    });
   }
 
   // ---------- YIL ----------
@@ -380,7 +283,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
                 labelText: 'Kalem adı',
-                hintText: 'Örn. Yakacak (Yıllık)',
+                hintText: 'Örn. Yakacak',
               ),
             ),
             const SizedBox(height: 12),
@@ -550,31 +453,6 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text(
-              'Belgeler',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 12),
-            _belgeKarti(
-              tur: 'pdf',
-              baslik: 'İmzalı Sözleşme',
-              ikon: Icons.picture_as_pdf,
-              renk: Colors.red,
-              url: veri['pdfUrl'] as String?,
-              ad: veri['pdfAd'] as String?,
-            ),
-            const SizedBox(height: 12),
-            _belgeKarti(
-              tur: 'word',
-              baslik: 'TİS Word Belgesi',
-              ikon: Icons.description,
-              renk: Colors.blue,
-              url: veri['wordUrl'] as String?,
-              ad: veri['wordAd'] as String?,
-            ),
-            const SizedBox(height: 28),
-            DonemEkBelgeler(isyeriId: widget.isyeriId, donemId: widget.donemId),
-            const SizedBox(height: 28),
             const Text(
               'Sözleşme Bilgileri',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
@@ -933,92 +811,6 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
           fontSize: 11.5,
           fontWeight: FontWeight.w700,
           color: renk,
-        ),
-      ),
-    );
-  }
-
-  Widget _belgeKarti({
-    required String tur,
-    required String baslik,
-    required IconData ikon,
-    required Color renk,
-    required String? url,
-    required String? ad,
-  }) {
-    final buYukleniyor = _yukleniyor == tur;
-    final varMi = url != null;
-
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Icon(ikon, color: renk, size: 40),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    baslik,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    varMi ? (ad ?? 'Yüklendi') : 'Henüz yüklenmedi',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: varMi ? AppRenk.emerald : Colors.grey,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            if (buYukleniyor)
-              const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else if (varMi)
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Aç',
-                    icon: const Icon(Icons.open_in_new, color: AppRenk.indigo),
-                    onPressed: () => _ac(url),
-                  ),
-                  IconButton(
-                    tooltip: 'İndir',
-                    icon: const Icon(Icons.download, color: AppRenk.emerald),
-                    onPressed: () => _indir(tur, ad),
-                  ),
-                  IconButton(
-                    tooltip: 'Değiştir',
-                    icon: const Icon(Icons.refresh, color: AppRenk.amber),
-                    onPressed: () => _yukle(tur),
-                  ),
-                  IconButton(
-                    tooltip: 'Sil',
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    onPressed: () => _belgeSil(tur),
-                  ),
-                ],
-              )
-            else
-              FilledButton.icon(
-                onPressed: () => _yukle(tur),
-                style: FilledButton.styleFrom(backgroundColor: AppRenk.indigo),
-                icon: const Icon(Icons.upload_file, size: 18),
-                label: const Text('Yükle'),
-              ),
-          ],
         ),
       ),
     );

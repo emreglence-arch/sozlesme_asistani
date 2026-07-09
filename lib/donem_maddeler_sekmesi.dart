@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:archive/archive.dart';
 import 'main.dart';
+import 'paylas.dart';
 
 class DonemMaddelerSekmesi extends StatefulWidget {
   final String isyeriId;
@@ -462,6 +463,11 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                TextButton.icon(
+                  onPressed: () => Paylas.menu(context, '$baslik\n\n$icerik'),
+                  icon: const Icon(Icons.share_outlined, size: 17),
+                  label: const Text('Paylaş'),
+                ),
                 TextButton.icon(
                   onPressed: () => _maddeDialog(maddeler, index: i),
                   icon: const Icon(Icons.edit_outlined, size: 17),

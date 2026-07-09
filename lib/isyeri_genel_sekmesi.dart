@@ -28,6 +28,9 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
   CollectionReference<Map<String, dynamic>> _donemlerRef() =>
       _isyeriRef().collection('donemler');
 
+  String _tarihMetni(DateTime t) =>
+      '${t.day.toString().padLeft(2, '0')}.${t.month.toString().padLeft(2, '0')}.${t.year}';
+
   int? _tamSayi(String? s) {
     if (s == null) return null;
     final t = s.replaceAll(RegExp(r'[^0-9]'), '');
@@ -43,6 +46,7 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
     return 'image/jpeg';
   }
 
+  // ---------- LOGO ----------
   Future<void> _logoYukle() async {
     final result = await FilePicker.pickFiles(
       type: FileType.image,
@@ -74,6 +78,7 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
     }
   }
 
+  // ---------- TEMEL BİLGİLER ----------
   Future<void> _temelDuzenle(Map<String, dynamic> veri) async {
     final adC = TextEditingController(
       text: veri['ad']?.toString() ?? widget.isyeriAdi,
@@ -162,59 +167,115 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
     });
   }
 
-  Future<void> _donemEkle() async {
-    final baslangicC = TextEditingController();
-    final bitisC = TextEditingController();
-    final sonuc = await showDialog<Map<String, String>>(
+  // ---------- DÖNEM EKLE / DÜZENLE ----------
+  Future<void> _donemDialog({
+    DocumentSnapshot<Map<String, dynamic>>? mevcut,
+  }) async {
+    final v = mevcut?.data() ?? {};
+    final donemNoC = TextEditingController(
+      text: (v['donemNo'] ?? '').toString(),
+    );
+    DateTime? baslangic = (v['baslangicTarihi'] as Timestamp?)?.toDate();
+    DateTime? bitis = (v['bitisTarihi'] as Timestamp?)?.toDate();
+
+    final kaydet = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Yeni Sözleşme Dönemi'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: baslangicC,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Başlangıç yılı',
-                hintText: 'Örn. 2026',
-              ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSt) => AlertDialog(
+          title: Text(
+            mevcut == null ? 'Yeni Sözleşme Dönemi' : 'Dönemi Düzenle',
+          ),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: donemNoC,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Kaçıncı dönem',
+                    hintText: 'Örn. 5',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final s = await showDatePicker(
+                        context: context,
+                        initialDate: baslangic ?? DateTime.now(),
+                        firstDate: DateTime(1990),
+                        lastDate: DateTime(2100),
+                      );
+                      if (s != null) setSt(() => baslangic = s);
+                    },
+                    icon: const Icon(Icons.event, size: 18),
+                    label: Text(
+                      baslangic == null
+                          ? 'Yürürlük başlangıcı seç'
+                          : 'Başlangıç: ${_tarihMetni(baslangic!)}',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final s = await showDatePicker(
+                        context: context,
+                        initialDate: bitis ?? baslangic ?? DateTime.now(),
+                        firstDate: DateTime(1990),
+                        lastDate: DateTime(2100),
+                      );
+                      if (s != null) setSt(() => bitis = s);
+                    },
+                    icon: const Icon(Icons.event_available, size: 18),
+                    label: Text(
+                      bitis == null
+                          ? 'Yürürlük bitişi seç'
+                          : 'Bitiş: ${_tarihMetni(bitis!)}',
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: bitisC,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Bitiş yılı',
-                hintText: 'Örn. 2027',
-              ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Vazgeç'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(mevcut == null ? 'Ekle' : 'Kaydet'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Vazgeç'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, {
-              'baslangic': baslangicC.text.trim(),
-              'bitis': bitisC.text.trim(),
-            }),
-            child: const Text('Ekle'),
-          ),
-        ],
       ),
     );
-    if (sonuc != null &&
-        sonuc['baslangic']!.isNotEmpty &&
-        sonuc['bitis']!.isNotEmpty) {
+
+    if (kaydet != true || baslangic == null || bitis == null) return;
+
+    final kayit = {
+      'donemNo': donemNoC.text.trim(),
+      'baslangicTarihi': Timestamp.fromDate(baslangic!),
+      'bitisTarihi': Timestamp.fromDate(bitis!),
+      'baslangicYili': baslangic!.year.toString(),
+      'bitisYili': bitis!.year.toString(),
+    };
+
+    if (mevcut == null) {
       await _donemlerRef().add({
-        'baslangicYili': sonuc['baslangic'],
-        'bitisYili': sonuc['bitis'],
+        ...kayit,
         'guncelMi': false,
         'olusturmaTarihi': FieldValue.serverTimestamp(),
       });
+    } else {
+      await _donemlerRef().doc(mevcut.id).update(kayit);
     }
   }
 
@@ -249,6 +310,7 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
     if (onay == true) await _donemlerRef().doc(donemId).delete();
   }
 
+  // ---------- EKRAN ----------
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -257,15 +319,37 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
         final veri = isyeriSnap.data?.data() ?? {};
         final ad = (veri['ad'] ?? widget.isyeriAdi).toString();
 
-        return StreamBuilder<QuerySnapshot>(
-          stream: _donemlerRef()
-              .orderBy('baslangicYili', descending: true)
-              .snapshots(),
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _donemlerRef().snapshots(),
           builder: (context, donemSnap) {
-            final donemler = donemSnap.data?.docs ?? [];
-            QueryDocumentSnapshot? guncel;
+            final donemler = donemSnap.data?.docs.toList() ?? [];
+
+            // Dönem numarasına göre büyükten küçüğe sırala
+            donemler.sort((a, b) {
+              final na =
+                  int.tryParse((a.data()['donemNo'] ?? '').toString()) ?? -1;
+              final nb =
+                  int.tryParse((b.data()['donemNo'] ?? '').toString()) ?? -1;
+              if (na != nb) return nb.compareTo(na);
+              final ya =
+                  int.tryParse((a.data()['baslangicYili'] ?? '').toString()) ??
+                  0;
+              final yb =
+                  int.tryParse((b.data()['baslangicYili'] ?? '').toString()) ??
+                  0;
+              return yb.compareTo(ya);
+            });
+
+            // Otomatik yürürlük: bitiş tarihi geçmemiş, en yüksek numaralı dönem
+            final simdi = DateTime.now();
+            DocumentSnapshot<Map<String, dynamic>>? guncel;
             for (final d in donemler) {
-              if ((d['guncelMi'] ?? false) == true) {
+              final v = d.data();
+              final bitT = (v['bitisTarihi'] as Timestamp?)?.toDate();
+              final bitYil = int.tryParse((v['bitisYili'] ?? '').toString());
+              final son =
+                  bitT ?? (bitYil != null ? DateTime(bitYil, 12, 31) : null);
+              if (son != null && son.isAfter(simdi)) {
                 guncel = d;
                 break;
               }
@@ -293,7 +377,7 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
                       ),
                     ),
                     TextButton.icon(
-                      onPressed: _donemEkle,
+                      onPressed: () => _donemDialog(),
                       icon: const Icon(Icons.add, size: 18),
                       label: const Text('Dönem Ekle'),
                     ),
@@ -311,7 +395,7 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
                     ),
                   )
                 else
-                  ...donemler.map((d) => _donemKarti(d)),
+                  ...donemler.map((d) => _donemKarti(d, d.id == guncel?.id)),
               ],
             );
           },
@@ -458,14 +542,24 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
     );
   }
 
-  Widget _guncelOzet(QueryDocumentSnapshot d) {
-    final bas = (d['baslangicYili'] ?? '').toString();
-    final bit = (d['bitisYili'] ?? '').toString();
+  Widget _guncelOzet(DocumentSnapshot<Map<String, dynamic>> d) {
+    final veri = d.data()!;
+    final donemNo = (veri['donemNo'] ?? '').toString();
+    final bas = (veri['baslangicYili'] ?? '').toString();
+    final bit = (veri['bitisYili'] ?? '').toString();
+    final basT = (veri['baslangicTarihi'] as Timestamp?)?.toDate();
+    final bitT = (veri['bitisTarihi'] as Timestamp?)?.toDate();
     final bitYil = int.tryParse(bit);
+
+    final baslik = donemNo.isNotEmpty ? '$donemNo. Dönem' : '$bas - $bit';
+    final tarihMetni = (basT != null && bitT != null)
+        ? '${_tarihMetni(basT)} - ${_tarihMetni(bitT)}'
+        : '$bas - $bit';
+
     String kalanMetin = '';
     Color kalanRenk = AppRenk.emerald;
-    if (bitYil != null) {
-      final son = DateTime(bitYil, 12, 31);
+    final son = bitT ?? (bitYil != null ? DateTime(bitYil, 12, 31) : null);
+    if (son != null) {
       final kalan = son.difference(DateTime.now()).inDays;
       if (kalan < 0) {
         kalanMetin = 'Süresi doldu';
@@ -490,7 +584,9 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
             builder: (_) => DonemDetaySayfasi(
               isyeriId: widget.isyeriId,
               donemId: d.id,
-              donemBaslik: '$bas - $bit',
+              donemBaslik: donemNo.isNotEmpty
+                  ? '$donemNo. Dönem ($bas-$bit)'
+                  : '$bas - $bit',
             ),
           ),
         ),
@@ -514,15 +610,23 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$bas - $bit',
+                      baslik,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
+                    const SizedBox(height: 2),
+                    Text(
+                      tarihMetni,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12.5,
+                      ),
+                    ),
                     if (kalanMetin.isNotEmpty) ...[
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,
@@ -553,10 +657,18 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
     );
   }
 
-  Widget _donemKarti(QueryDocumentSnapshot d) {
-    final bas = (d['baslangicYili'] ?? '').toString();
-    final bit = (d['bitisYili'] ?? '').toString();
-    final guncelMi = (d['guncelMi'] ?? false) as bool;
+  Widget _donemKarti(DocumentSnapshot<Map<String, dynamic>> d, bool guncelMi) {
+    final veri = d.data()!;
+    final donemNo = (veri['donemNo'] ?? '').toString();
+    final bas = (veri['baslangicYili'] ?? '').toString();
+    final bit = (veri['bitisYili'] ?? '').toString();
+    final basT = (veri['baslangicTarihi'] as Timestamp?)?.toDate();
+    final bitT = (veri['bitisTarihi'] as Timestamp?)?.toDate();
+
+    final baslik = donemNo.isNotEmpty ? '$donemNo. Dönem' : '$bas - $bit';
+    final tarihMetni = (basT != null && bitT != null)
+        ? '${_tarihMetni(basT)} - ${_tarihMetni(bitT)}'
+        : '$bas - $bit';
 
     return Card(
       elevation: 0,
@@ -574,30 +686,33 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
           size: 34,
         ),
         title: Text(
-          '$bas - $bit',
+          baslik,
           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
         ),
-        subtitle: guncelMi
-            ? const Text(
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 2),
+            Text(tarihMetni, style: const TextStyle(fontSize: 12.5)),
+            if (guncelMi)
+              const Text(
                 'Yürürlükte',
                 style: TextStyle(
                   color: AppRenk.emerald,
                   fontWeight: FontWeight.w500,
+                  fontSize: 12.5,
                 ),
-              )
-            : const Text('Geçmiş dönem'),
+              ),
+          ],
+        ),
         trailing: PopupMenuButton<String>(
           onSelected: (deger) {
-            if (deger == 'guncel') _guncelYap(d.id);
+            if (deger == 'duzenle') _donemDialog(mevcut: d);
             if (deger == 'sil') _donemSil(d.id);
           },
-          itemBuilder: (context) => [
-            if (!guncelMi)
-              const PopupMenuItem(
-                value: 'guncel',
-                child: Text('Yürürlükte işaretle'),
-              ),
-            const PopupMenuItem(value: 'sil', child: Text('Sil')),
+          itemBuilder: (context) => const [
+            PopupMenuItem(value: 'duzenle', child: Text('Düzenle')),
+            PopupMenuItem(value: 'sil', child: Text('Sil')),
           ],
         ),
         onTap: () => Navigator.push(
@@ -606,7 +721,9 @@ class _IsyeriGenelSekmesiState extends State<IsyeriGenelSekmesi> {
             builder: (_) => DonemDetaySayfasi(
               isyeriId: widget.isyeriId,
               donemId: d.id,
-              donemBaslik: '$bas - $bit',
+              donemBaslik: donemNo.isNotEmpty
+                  ? '$donemNo. Dönem ($bas-$bit)'
+                  : '$bas - $bit',
             ),
           ),
         ),

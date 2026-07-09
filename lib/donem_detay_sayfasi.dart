@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'main.dart';
 import 'donem_bilgiler_sekmesi.dart';
 import 'donem_maddeler_sekmesi.dart';
+import 'donem_belgeler_sekmesi.dart';
 
 class DonemDetaySayfasi extends StatelessWidget {
   final String isyeriId;
@@ -18,7 +19,7 @@ class DonemDetaySayfasi extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: Text(donemBaslik),
@@ -30,8 +31,9 @@ class DonemDetaySayfasi extends StatelessWidget {
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white70,
             tabs: [
-              Tab(icon: Icon(Icons.info_outline), text: 'Bilgiler'),
+              Tab(icon: Icon(Icons.dashboard_outlined), text: 'Özet'),
               Tab(icon: Icon(Icons.article_outlined), text: 'TİS Metni'),
+              Tab(icon: Icon(Icons.folder_outlined), text: 'Belgeler'),
             ],
           ),
         ),
@@ -39,6 +41,7 @@ class DonemDetaySayfasi extends StatelessWidget {
           children: [
             DonemBilgilerSekmesi(isyeriId: isyeriId, donemId: donemId),
             DonemMaddelerSekmesi(isyeriId: isyeriId, donemId: donemId),
+            DonemBelgelerSekmesi(isyeriId: isyeriId, donemId: donemId),
           ],
         ),
       ),
