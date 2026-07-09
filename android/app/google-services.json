@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "584233203109",
+    "project_id": "sozlesme-asistani",
+    "storage_bucket": "sozlesme-asistani.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:584233203109:android:ea23388baa693fd844a44c",
+        "android_client_info": {
+          "package_name": "com.tumtis.sozlesme_asistani"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBk47VegIGjQAHSvkwBikC9wkXCTgJo9pw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
