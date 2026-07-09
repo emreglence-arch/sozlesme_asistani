@@ -23,6 +23,7 @@ class DonemMaddelerSekmesi extends StatefulWidget {
 
 class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
   bool _islemde = false;
+  String _arama = '';
 
   DocumentReference<Map<String, dynamic>> _donemRef() => FirebaseFirestore
       .instance
@@ -308,6 +309,27 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(metin)));
   }
 
+  // Aramaya uyan maddelerin ORİJİNAL sıra numaralarını döner
+  List<int> _filtreliIndeksler(List<Map<String, dynamic>> maddeler) {
+    final sonuc = <int>[];
+    for (var i = 0; i < maddeler.length; i++) {
+      if (_arama.isEmpty) {
+        sonuc.add(i);
+        continue;
+      }
+      final m = maddeler[i];
+      final baslik = (m['baslik'] ?? '').toString().toLowerCase();
+      final icerik = (m['icerik'] ?? '').toString().toLowerCase();
+      final bolum = (m['bolum'] ?? '').toString().toLowerCase();
+      if (baslik.contains(_arama) ||
+          icerik.contains(_arama) ||
+          bolum.contains(_arama)) {
+        sonuc.add(i);
+      }
+    }
+    return sonuc;
+  }
+
   // ---------- EKRAN ----------
   @override
   Widget build(BuildContext context) {
@@ -320,6 +342,7 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
         final veri = snapshot.data!.data() ?? {};
         final maddeler = _maddeler(veri);
         final wordVar = veri['wordUrl'] != null;
+        final indeksler = _filtreliIndeksler(maddeler);
 
         return Stack(
           children: [
@@ -334,7 +357,7 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
                       onPressed: wordVar
                           ? () => _wordDen(maddeler)
                           : () => _bilgi(
-                              'Önce "Bilgiler" sekmesinden Word dosyası yükleyin.',
+                              'Önce "Belgeler" sekmesinden Word dosyası yükleyin.',
                             ),
                       style: FilledButton.styleFrom(
                         backgroundColor: AppRenk.indigo,
@@ -354,11 +377,59 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
+                if (maddeler.isNotEmpty)
+                  TextField(
+                    onChanged: (v) => setState(() => _arama = v.toLowerCase()),
+                    decoration: InputDecoration(
+                      hintText: 'Madde ara (başlık veya içerik)',
+                      prefixIcon: const Icon(Icons.search),
+                      isDense: true,
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 14),
                 if (maddeler.isEmpty)
                   _bosDurum()
-                else
-                  ..._grupluListe(maddeler),
+                else if (indeksler.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 40),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.search_off,
+                            size: 54,
+                            color: Colors.grey.shade400,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            '"$_arama" için sonuç yok',
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else ...[
+                  if (_arama.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6, left: 4),
+                      child: Text(
+                        '${indeksler.length} madde bulundu',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ),
+                  ..._grupluListe(maddeler, indeksler),
+                ],
               ],
             ),
             if (_islemde)
@@ -399,10 +470,13 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
     );
   }
 
-  List<Widget> _grupluListe(List<Map<String, dynamic>> maddeler) {
+  List<Widget> _grupluListe(
+    List<Map<String, dynamic>> maddeler,
+    List<int> indeksler,
+  ) {
     final widgets = <Widget>[];
     String? sonBolum;
-    for (var i = 0; i < maddeler.length; i++) {
+    for (final i in indeksler) {
       final m = maddeler[i];
       final bolum = (m['bolum'] ?? '').toString();
       if (bolum != sonBolum) {
@@ -441,6 +515,8 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
+          key: ValueKey('madde_$i'),
+          initiallyExpanded: _arama.isNotEmpty,
           tilePadding: const EdgeInsets.symmetric(horizontal: 16),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           title: Text(

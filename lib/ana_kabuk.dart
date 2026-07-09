@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'main.dart';
 import 'isyerleri_ekrani.dart';
+import 'guncel_tisler_ekrani.dart';
 import 'ayarlar_ekrani.dart';
 
 class AnaKabuk extends StatefulWidget {
@@ -13,11 +14,13 @@ class AnaKabuk extends StatefulWidget {
 class _AnaKabukState extends State<AnaKabuk> {
   int _secili = 0;
 
-  static const _basliklar = ['İşyerleri', 'Ayarlar'];
+  static const _basliklar = ['İşyerleri', 'Güncel TİS\'ler', 'Ayarlar'];
 
   Widget _icerik() {
     switch (_secili) {
       case 1:
+        return const GuncelTislerEkrani();
+      case 2:
         return const AyarlarEkrani();
       default:
         return const IsyerleriEkrani();
@@ -126,10 +129,16 @@ class _YanMenu extends StatelessWidget {
               index: 0,
             ),
             _menuOge(
+              ikon: Icons.verified_outlined,
+              seciliIkon: Icons.verified,
+              baslik: 'Güncel TİS\'ler',
+              index: 1,
+            ),
+            _menuOge(
               ikon: Icons.settings_outlined,
               seciliIkon: Icons.settings,
               baslik: 'Ayarlar',
-              index: 1,
+              index: 2,
             ),
             const Spacer(),
             Padding(
