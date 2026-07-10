@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
 import 'isyerleri_ekrani.dart';
 import 'guncel_tisler_ekrani.dart';
 import 'ayarlar_ekrani.dart';
+import 'ozel_sayfalar_servisi.dart';
+import 'ozel_sayfa_ekrani.dart';
 
 class AnaKabuk extends StatefulWidget {
   const AnaKabuk({super.key});
@@ -12,60 +15,92 @@ class AnaKabuk extends StatefulWidget {
 }
 
 class _AnaKabukState extends State<AnaKabuk> {
+  // 0: İşyerleri, 1: Güncel TİS'ler, 2..n: özel sayfalar, son: Ayarlar
   int _secili = 0;
-
-  static const _basliklar = ['İşyerleri', 'Güncel TİS\'ler', 'Ayarlar'];
-
-  Widget _icerik() {
-    switch (_secili) {
-      case 1:
-        return const GuncelTislerEkrani();
-      case 2:
-        return const AyarlarEkrani();
-      default:
-        return const IsyerleriEkrani();
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
-    final genis = MediaQuery.of(context).size.width >= 800;
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: OzelSayfalarServisi.akis(),
+      builder: (context, snap) {
+        final ozelSayfalar = snap.data?.docs ?? [];
+        final ayarlarIndex = 2 + ozelSayfalar.length;
+        final secili = _secili.clamp(0, ayarlarIndex);
 
-    final menu = _YanMenu(
-      secili: _secili,
-      onSec: (i) {
-        setState(() => _secili = i);
-        if (!genis) Navigator.pop(context);
+        String baslik;
+        Widget icerik;
+
+        if (secili == 0) {
+          baslik = 'İşyerleri';
+          icerik = const IsyerleriEkrani();
+        } else if (secili == 1) {
+          baslik = 'Güncel TİS\'ler';
+          icerik = const GuncelTislerEkrani();
+        } else if (secili == ayarlarIndex) {
+          baslik = 'Ayarlar';
+          icerik = const AyarlarEkrani();
+        } else {
+          final s = ozelSayfalar[secili - 2];
+          final v = s.data();
+          final ad = (v['ad'] ?? '').toString();
+          baslik = ad;
+          icerik = OzelSayfaEkrani(
+            key: ValueKey(s.id),
+            sayfaId: s.id,
+            sayfaAdi: ad,
+            renk: Color((v['renk'] ?? AppRenk.indigo.value) as int),
+            ikon: ikonBul(v['ikon']?.toString()),
+          );
+        }
+
+        final genis = MediaQuery.of(context).size.width >= 800;
+
+        final menu = _YanMenu(
+          secili: secili,
+          ozelSayfalar: ozelSayfalar,
+          ayarlarIndex: ayarlarIndex,
+          onSec: (i) {
+            setState(() => _secili = i);
+            if (!genis) Navigator.pop(context);
+          },
+        );
+
+        return Scaffold(
+          appBar: genis
+              ? null
+              : AppBar(
+                  title: Text(baslik),
+                  backgroundColor: AppRenk.indigo,
+                  foregroundColor: Colors.white,
+                ),
+          drawer: genis ? null : Drawer(child: menu),
+          body: genis
+              ? Row(
+                  children: [
+                    SizedBox(width: 250, child: menu),
+                    const VerticalDivider(width: 1, thickness: 1),
+                    Expanded(child: icerik),
+                  ],
+                )
+              : icerik,
+        );
       },
-    );
-
-    return Scaffold(
-      appBar: genis
-          ? null
-          : AppBar(
-              title: Text(_basliklar[_secili]),
-              backgroundColor: AppRenk.indigo,
-              foregroundColor: Colors.white,
-            ),
-      drawer: genis ? null : Drawer(child: menu),
-      body: genis
-          ? Row(
-              children: [
-                SizedBox(width: 250, child: menu),
-                const VerticalDivider(width: 1, thickness: 1),
-                Expanded(child: _icerik()),
-              ],
-            )
-          : _icerik(),
     );
   }
 }
 
 class _YanMenu extends StatelessWidget {
   final int secili;
+  final List<QueryDocumentSnapshot<Map<String, dynamic>>> ozelSayfalar;
+  final int ayarlarIndex;
   final ValueChanged<int> onSec;
 
-  const _YanMenu({required this.secili, required this.onSec});
+  const _YanMenu({
+    required this.secili,
+    required this.ozelSayfalar,
+    required this.ayarlarIndex,
+    required this.onSec,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -122,25 +157,72 @@ class _YanMenu extends StatelessWidget {
             ),
             const Divider(height: 1),
             const SizedBox(height: 12),
-            _menuOge(
-              ikon: Icons.business_outlined,
-              seciliIkon: Icons.business,
-              baslik: 'İşyerleri',
-              index: 0,
+
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _menuOge(
+                    ikon: Icons.business_outlined,
+                    seciliIkon: Icons.business,
+                    baslik: 'İşyerleri',
+                    index: 0,
+                    renk: AppRenk.indigo,
+                  ),
+                  _menuOge(
+                    ikon: Icons.verified_outlined,
+                    seciliIkon: Icons.verified,
+                    baslik: 'Güncel TİS\'ler',
+                    index: 1,
+                    renk: AppRenk.indigo,
+                  ),
+
+                  if (ozelSayfalar.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(26, 6, 20, 6),
+                      child: Text(
+                        'SAYFALARIM',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                          color: Colors.grey.shade400,
+                        ),
+                      ),
+                    ),
+                    for (var i = 0; i < ozelSayfalar.length; i++)
+                      _menuOge(
+                        ikon: ikonBul(
+                          ozelSayfalar[i].data()['ikon']?.toString(),
+                        ),
+                        seciliIkon: ikonBul(
+                          ozelSayfalar[i].data()['ikon']?.toString(),
+                        ),
+                        baslik: (ozelSayfalar[i].data()['ad'] ?? '').toString(),
+                        index: 2 + i,
+                        renk: Color(
+                          (ozelSayfalar[i].data()['renk'] ??
+                                  AppRenk.indigo.value)
+                              as int,
+                        ),
+                      ),
+                  ],
+
+                  const SizedBox(height: 10),
+                  const Divider(indent: 20, endIndent: 20),
+                  const SizedBox(height: 4),
+                  _menuOge(
+                    ikon: Icons.settings_outlined,
+                    seciliIkon: Icons.settings,
+                    baslik: 'Ayarlar',
+                    index: ayarlarIndex,
+                    renk: AppRenk.indigo,
+                  ),
+                ],
+              ),
             ),
-            _menuOge(
-              ikon: Icons.verified_outlined,
-              seciliIkon: Icons.verified,
-              baslik: 'Güncel TİS\'ler',
-              index: 1,
-            ),
-            _menuOge(
-              ikon: Icons.settings_outlined,
-              seciliIkon: Icons.settings,
-              baslik: 'Ayarlar',
-              index: 2,
-            ),
-            const Spacer(),
+
             Padding(
               padding: const EdgeInsets.all(20),
               child: Text(
@@ -164,12 +246,13 @@ class _YanMenu extends StatelessWidget {
     required IconData seciliIkon,
     required String baslik,
     required int index,
+    required Color renk,
   }) {
     final aktif = secili == index;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: Material(
-        color: aktif ? AppRenk.indigo.withOpacity(0.09) : Colors.transparent,
+        color: aktif ? renk.withOpacity(0.09) : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -181,15 +264,19 @@ class _YanMenu extends StatelessWidget {
                 Icon(
                   aktif ? seciliIkon : ikon,
                   size: 21,
-                  color: aktif ? AppRenk.indigo : Colors.grey.shade600,
+                  color: aktif ? renk : Colors.grey.shade600,
                 ),
                 const SizedBox(width: 14),
-                Text(
-                  baslik,
-                  style: TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: aktif ? FontWeight.w700 : FontWeight.w500,
-                    color: aktif ? AppRenk.indigo : Colors.grey.shade800,
+                Expanded(
+                  child: Text(
+                    baslik,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: aktif ? FontWeight.w700 : FontWeight.w500,
+                      color: aktif ? renk : Colors.grey.shade800,
+                    ),
                   ),
                 ),
               ],
