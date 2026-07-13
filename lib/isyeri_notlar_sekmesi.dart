@@ -11,12 +11,17 @@ class IsyeriNotlarSekmesi extends StatefulWidget {
 }
 
 class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
-  static const etiketler = [
-    'Görüşme',
-    'Toplantı',
-    'Uyuşmazlık',
-    'Ziyaret',
-    'Diğer',
+  // Daha önce kullanılmış etiketler (öneri olarak sunulur)
+  List<String> _etiketOneri = [];
+
+  static const _palet = [
+    AppRenk.indigo,
+    AppRenk.emerald,
+    AppRenk.amber,
+    Colors.red,
+    Colors.purple,
+    Colors.teal,
+    Colors.blueGrey,
   ];
 
   DocumentReference<Map<String, dynamic>> _isyeriRef() =>
@@ -26,18 +31,12 @@ class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
       _isyeriRef().collection('gunluk');
 
   Color _etiketRenk(String e) {
-    switch (e) {
-      case 'Görüşme':
-        return AppRenk.indigo;
-      case 'Toplantı':
-        return AppRenk.emerald;
-      case 'Uyuşmazlık':
-        return Colors.red;
-      case 'Ziyaret':
-        return AppRenk.amber;
-      default:
-        return Colors.grey;
+    if (e.isEmpty) return Colors.grey;
+    var h = 0;
+    for (final c in e.codeUnits) {
+      h = (h + c) % 1000;
     }
+    return _palet[h % _palet.length];
   }
 
   String _tarihMetni(DateTime t) {
@@ -101,7 +100,7 @@ class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
     final v = mevcut?.data() ?? {};
     final baslikC = TextEditingController(text: v['baslik']?.toString() ?? '');
     final icerikC = TextEditingController(text: v['icerik']?.toString() ?? '');
-    String etiket = (v['etiket'] ?? 'Görüşme').toString();
+    final etiketC = TextEditingController(text: v['etiket']?.toString() ?? '');
     DateTime tarih = (v['tarih'] as Timestamp?)?.toDate() ?? DateTime.now();
 
     final kaydet = await showDialog<bool>(
@@ -114,6 +113,7 @@ class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
@@ -134,32 +134,38 @@ class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
                       ),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: etiket,
-                          isDense: true,
+                        child: TextField(
+                          controller: etiketC,
+                          textCapitalization: TextCapitalization.words,
                           decoration: const InputDecoration(
+                            labelText: 'Etiket',
+                            hintText: 'Örn. Görüşme',
+                            isDense: true,
                             border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 12,
-                            ),
                           ),
-                          items: etiketler
-                              .map(
-                                (e) => DropdownMenuItem(
-                                  value: e,
-                                  child: Text(
-                                    e,
-                                    style: const TextStyle(fontSize: 13),
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (x) => setSt(() => etiket = x!),
                         ),
                       ),
                     ],
                   ),
+                  if (_etiketOneri.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: _etiketOneri
+                          .map(
+                            (o) => ActionChip(
+                              label: Text(
+                                o,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => etiketC.text = o,
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   TextField(
                     controller: baslikC,
@@ -204,7 +210,7 @@ class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
     final kayit = {
       'baslik': baslikC.text.trim(),
       'icerik': icerikC.text.trim(),
-      'etiket': etiket,
+      'etiket': etiketC.text.trim(),
       'tarih': Timestamp.fromDate(tarih),
     };
     if (mevcut == null) {
@@ -253,7 +259,6 @@ class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
         children: [
-          // Genel notlar
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
             stream: _isyeriRef().snapshots(),
             builder: (context, snap) {
@@ -335,6 +340,16 @@ class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
                 );
               }
               final girdiler = snap.data!.docs;
+
+              // Öneri listesini güncelle
+              _etiketOneri =
+                  girdiler
+                      .map((g) => (g.data()['etiket'] ?? '').toString())
+                      .where((s) => s.isNotEmpty)
+                      .toSet()
+                      .toList()
+                    ..sort();
+
               if (girdiler.isEmpty) {
                 return Container(
                   width: double.infinity,
@@ -388,7 +403,7 @@ class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
     final v = g.data()!;
     final baslik = (v['baslik'] ?? '').toString();
     final icerik = (v['icerik'] ?? '').toString();
-    final etiket = (v['etiket'] ?? 'Diğer').toString();
+    final etiket = (v['etiket'] ?? '').toString();
     final tarih = (v['tarih'] as Timestamp?)?.toDate();
     final renk = _etiketRenk(etiket);
 
@@ -403,25 +418,26 @@ class _IsyeriNotlarSekmesiState extends State<IsyeriNotlarSekmesi> {
           children: [
             Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: renk.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    etiket,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: renk,
+                if (etiket.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: renk.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      etiket,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: renk,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
+                if (etiket.isNotEmpty) const SizedBox(width: 10),
                 if (tarih != null)
                   Text(
                     _tarihMetni(tarih),

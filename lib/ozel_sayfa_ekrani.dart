@@ -15,12 +15,20 @@ class OzelSayfaEkrani extends StatefulWidget {
   final Color renk;
   final IconData ikon;
 
+  /// Verinin yazılacağı kök belge. Boşsa ozelSayfalar/{sayfaId} kullanılır.
+  final DocumentReference<Map<String, dynamic>>? kokRef;
+
+  /// Başlık ve ikonu üstte gösterelim mi? (sekme içinde kullanılırken gizlenir)
+  final bool basligiGoster;
+
   const OzelSayfaEkrani({
     super.key,
     required this.sayfaId,
     required this.sayfaAdi,
     required this.renk,
     required this.ikon,
+    this.kokRef,
+    this.basligiGoster = true,
   });
 
   @override
@@ -46,6 +54,7 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
   String? get _aktifKlasorId => _yol.last.id;
 
   DocumentReference<Map<String, dynamic>> _sayfaRef() =>
+      widget.kokRef ??
       FirebaseFirestore.instance.collection('ozelSayfalar').doc(widget.sayfaId);
 
   CollectionReference<Map<String, dynamic>> _klasorlerRef() =>
@@ -638,32 +647,33 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
         children: [
           Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: widget.renk.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(11),
+              if (widget.basligiGoster)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: widget.renk.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(11),
+                        ),
+                        child: Icon(widget.ikon, color: widget.renk, size: 21),
                       ),
-                      child: Icon(widget.ikon, color: widget.renk, size: 21),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        widget.sayfaAdi,
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          widget.sayfaAdi,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
               if (_yol.length > 1)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),

@@ -4,6 +4,7 @@ import 'main.dart';
 import 'isyeri_genel_sekmesi.dart';
 import 'isyeri_kisiler_sekmesi.dart';
 import 'isyeri_notlar_sekmesi.dart';
+import 'ozel_sayfa_ekrani.dart';
 
 class IsyeriSayfasi extends StatelessWidget {
   final String isyeriId;
@@ -26,13 +27,14 @@ class IsyeriSayfasi extends StatelessWidget {
         final ad = (snapshot.data?.data()?['ad'] ?? isyeriAdi).toString();
 
         return DefaultTabController(
-          length: 3,
+          length: 4,
           child: Scaffold(
             appBar: AppBar(
               title: Text(ad),
               backgroundColor: AppRenk.indigo,
               foregroundColor: Colors.white,
               bottom: const TabBar(
+                isScrollable: true,
                 indicatorColor: AppRenk.amber,
                 indicatorWeight: 3,
                 labelColor: Colors.white,
@@ -40,6 +42,7 @@ class IsyeriSayfasi extends StatelessWidget {
                 tabs: [
                   Tab(icon: Icon(Icons.business_outlined), text: 'Genel'),
                   Tab(icon: Icon(Icons.contacts_outlined), text: 'Detay'),
+                  Tab(icon: Icon(Icons.folder_outlined), text: 'Belgeler'),
                   Tab(icon: Icon(Icons.sticky_note_2_outlined), text: 'Notlar'),
                 ],
               ),
@@ -48,6 +51,18 @@ class IsyeriSayfasi extends StatelessWidget {
               children: [
                 IsyeriGenelSekmesi(isyeriId: isyeriId, isyeriAdi: isyeriAdi),
                 IsyeriKisilerSekmesi(isyeriId: isyeriId),
+                OzelSayfaEkrani(
+                  sayfaId: isyeriId,
+                  sayfaAdi: 'Belgeler',
+                  renk: AppRenk.indigo,
+                  ikon: Icons.folder_outlined,
+                  basligiGoster: false,
+                  kokRef: FirebaseFirestore.instance
+                      .collection('isyerleri')
+                      .doc(isyeriId)
+                      .collection('belgeAlani')
+                      .doc('kok'),
+                ),
                 IsyeriNotlarSekmesi(isyeriId: isyeriId),
               ],
             ),
