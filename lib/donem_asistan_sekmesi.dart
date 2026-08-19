@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'main.dart';
 import 'ayarlar_servisi.dart';
 import 'paylas.dart';
+import 'asistan_ayarlari_servisi.dart';
 
 class DonemAsistanSekmesi extends StatefulWidget {
   final String isyeriId;
@@ -38,13 +39,6 @@ class _DonemAsistanSekmesiState extends State<DonemAsistanSekmesi> {
   String? _anahtar;
   bool _hazir = false;
 
-  static const _ornekSorular = [
-    'Yemek ücreti ne kadar?',
-    'Temsilci izinleri nasıl düzenlenmiş?',
-    'Doğum izni ne kadar?',
-    'İkramiye kaç maaş?',
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -53,11 +47,12 @@ class _DonemAsistanSekmesiState extends State<DonemAsistanSekmesi> {
 
   Future<void> _anahtarKontrol() async {
     final a = await AyarlarServisi.anahtarAl();
-    if (mounted)
+    if (mounted) {
       setState(() {
         _anahtar = a;
         _hazir = true;
       });
+    }
   }
 
   DocumentReference<Map<String, dynamic>> _donemRef() => FirebaseFirestore
@@ -324,24 +319,34 @@ $baglam
           ),
         ),
         const SizedBox(height: 10),
-        ..._ornekSorular.map(
-          (s) => Card(
-            elevation: 0,
-            margin: const EdgeInsets.only(bottom: 8),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: ListTile(
-              dense: true,
-              leading: const Icon(
-                Icons.help_outline,
-                size: 19,
-                color: AppRenk.indigo,
-              ),
-              title: Text(s, style: const TextStyle(fontSize: 13.5)),
-              onTap: () => _sor(s),
-            ),
-          ),
+        StreamBuilder<List<String>>(
+          stream: AsistanAyarlariServisi.tisSorulariAkis(),
+          builder: (context, snap) {
+            final sorular = snap.data ?? [];
+            return Column(
+              children: sorular
+                  .map(
+                    (s) => Card(
+                      elevation: 0,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ListTile(
+                        dense: true,
+                        leading: const Icon(
+                          Icons.help_outline,
+                          size: 19,
+                          color: AppRenk.indigo,
+                        ),
+                        title: Text(s, style: const TextStyle(fontSize: 13.5)),
+                        onTap: () => _sor(s),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            );
+          },
         ),
       ],
     );

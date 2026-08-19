@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
 import 'main.dart';
 
 const Map<String, List<String>> presetKategoriler = {
@@ -50,7 +52,6 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     return kategori['tip'] == 'direkt' || direktKategoriler.contains(ad);
   }
 
-  // ---------- YIL ----------
   int _yilSayisi(Map<String, dynamic> veri) {
     final b = int.tryParse((veri['baslangicYili'] ?? '').toString());
     final s = int.tryParse((veri['bitisYili'] ?? '').toString());
@@ -64,7 +65,6 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     return '$i. Yıl';
   }
 
-  // ---------- VERİ ----------
   List<Map<String, dynamic>> _kategoriler(Map<String, dynamic> veri) {
     final raw = veri['kategoriler'];
     if (raw is List) {
@@ -98,6 +98,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
           return {
             'ad': x['ad'] ?? '',
             'yil1': x['yil1'] ?? '',
+            'not': x['not'] ?? '',
             'overrides': Map<String, dynamic>.from(ov),
           };
         }).toList(),
@@ -108,7 +109,6 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
   Future<void> _kaydet(List<Map<String, dynamic>> k) =>
       _donemRef().update({'kategoriler': k});
 
-  // ---------- SAYI / HESAP ----------
   double? _sayi(String? raw) {
     if (raw == null) return null;
     var s = raw
@@ -186,7 +186,131 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     return {'metin': '', 'tur': 'yok', 'kural': kural, 'baz': yil1};
   }
 
-  // ---------- DİYALOGLAR ----------
+  // ---------- EXCEL / CSV ----------
+  String _csvHucre(String deger) {
+    var s = deger;
+    final ozel =
+        s.contains('"') ||
+        s.contains(';') ||
+        s.contains('\n') ||
+        s.contains(',');
+    if (s.contains('"')) s = s.replaceAll('"', '""');
+    if (ozel) s = '"$s"';
+    return s;
+  }
+
+  List<int> _utf8(String s) {
+    final out = <int>[];
+    for (final rune in s.runes) {
+      if (rune < 0x80) {
+        out.add(rune);
+      } else if (rune < 0x800) {
+        out.add(0xC0 | (rune >> 6));
+        out.add(0x80 | (rune & 0x3F));
+      } else if (rune < 0x10000) {
+        out.add(0xE0 | (rune >> 12));
+        out.add(0x80 | ((rune >> 6) & 0x3F));
+        out.add(0x80 | (rune & 0x3F));
+      } else {
+        out.add(0xF0 | (rune >> 18));
+        out.add(0x80 | ((rune >> 12) & 0x3F));
+        out.add(0x80 | ((rune >> 6) & 0x3F));
+        out.add(0x80 | (rune & 0x3F));
+      }
+    }
+    return out;
+  }
+
+  Future<void> _exceleAktar(Map<String, dynamic> veri) async {
+    final kategoriler = _kategoriler(veri);
+    if (kategoriler.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Aktarılacak veri yok')));
+      return;
+    }
+    final yilSayisi = _yilSayisi(veri);
+    final buf = StringBuffer();
+
+    // Başlık satırı: Kategori ; Kalem ; 1. Yıl ; 2. Yıl ... ; Not
+    final basliklar = <String>['Kategori', 'Kalem'];
+    for (var y = 1; y <= yilSayisi; y++) {
+      basliklar.add(_yilEtiketi(veri, y));
+    }
+    basliklar.add('Not');
+    buf.writeln(basliklar.map(_csvHucre).join(';'));
+
+    for (final kategori in kategoriler) {
+      final ad = (kategori['ad'] ?? '').toString();
+      final direkt = _direkt(kategori);
+      final zamlar = (kategori['zamlar'] is Map)
+          ? Map<String, dynamic>.from(kategori['zamlar'])
+          : {};
+
+      // Zam oranı satırı (direkt olmayan kategoriler için, çok yıllıysa)
+      if (!direkt && yilSayisi > 1) {
+        final satir = <String>[ad, 'Yıllık Zam Oranı'];
+        for (var y = 1; y <= yilSayisi; y++) {
+          if (y == 1) {
+            satir.add('-');
+          } else {
+            final kural = (zamlar['$y'] ?? '').toString().trim();
+            satir.add(
+              kural.isEmpty ? '' : (_sayi(kural) != null ? '%$kural' : kural),
+            );
+          }
+        }
+        satir.add('');
+        buf.writeln(satir.map(_csvHucre).join(';'));
+      }
+
+      // Kalem satırları
+      for (final kalem in _kalemler(kategori)) {
+        final kalemAd = (kalem['ad'] ?? '').toString();
+        final kalemNot = (kalem['not'] ?? '').toString();
+        final satir = <String>[ad, kalemAd];
+        for (var y = 1; y <= yilSayisi; y++) {
+          if (y <= 1) {
+            satir.add((kalem['yil1'] ?? '').toString());
+          } else if (direkt) {
+            final ov = (kalem['overrides'] is Map)
+                ? Map<String, dynamic>.from(kalem['overrides'])
+                : {};
+            satir.add((ov['$y'] ?? '').toString());
+          } else {
+            final h = _hesapla(kalem, kategori, y);
+            satir.add((h['metin'] ?? '').toString());
+          }
+        }
+        satir.add(kalemNot);
+        buf.writeln(satir.map(_csvHucre).join(';'));
+      }
+    }
+
+    final bom = [0xEF, 0xBB, 0xBF];
+    final bytes = [...bom, ..._utf8(buf.toString())];
+
+    try {
+      final hedef = await FilePicker.saveFile(
+        dialogTitle: 'Excel dosyasını kaydet',
+        fileName: 'sozlesme_ozeti.csv',
+      );
+      if (hedef == null) return;
+      await File(hedef).writeAsBytes(bytes);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kaydedildi: sozlesme_ozeti.csv')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Aktarma hatası: $e')));
+      }
+    }
+  }
+
   Future<bool?> _onayDialog(String baslik, String metin) {
     return showDialog<bool>(
       context: context,
@@ -245,6 +369,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     bool direkt = false,
   }) {
     final adC = TextEditingController(text: mevcut?['ad']?.toString() ?? '');
+    final notC = TextEditingController(text: mevcut?['not']?.toString() ?? '');
     String basDeger;
     if (yil <= 1) {
       basDeger = mevcut?['yil1']?.toString() ?? '';
@@ -275,23 +400,36 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(mevcut == null ? 'Kalem Ekle' : 'Kalem Düzenle'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: adC,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Kalem adı',
-                hintText: 'Örn. Yakacak',
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: adC,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Kalem adı',
+                  hintText: 'Örn. Yakacak',
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: degerC,
-              decoration: InputDecoration(labelText: etiket, hintText: ipucu),
-            ),
-          ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: degerC,
+                decoration: InputDecoration(labelText: etiket, hintText: ipucu),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: notC,
+                maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Not (opsiyonel)',
+                  hintText: 'Örn. aylık, evli çalışana; çocuk başına',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -302,6 +440,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
             onPressed: () => Navigator.pop(context, {
               'ad': adC.text.trim(),
               'deger': degerC.text.trim(),
+              'not': notC.text.trim(),
             }),
             child: const Text('Kaydet'),
           ),
@@ -310,13 +449,12 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     );
   }
 
-  // ---------- İŞLEMLER ----------
   Future<void> _presetKategoriEkle(
     List<Map<String, dynamic>> mevcut,
     String ad,
   ) async {
     final kalemler = (presetKategoriler[ad] ?? [])
-        .map((k) => {'ad': k, 'yil1': '', 'overrides': {}})
+        .map((k) => {'ad': k, 'yil1': '', 'not': '', 'overrides': {}})
         .toList();
     final yeni = _kopya(mevcut)
       ..add({
@@ -393,6 +531,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     (yeni[kat]['kalemler'] as List).add({
       'ad': sonuc['ad'],
       'yil1': sonuc['deger'],
+      'not': sonuc['not'],
       'overrides': {},
     });
     await _kaydet(yeni);
@@ -417,6 +556,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     final yeni = _kopya(mevcut);
     final k = (yeni[kat]['kalemler'] as List)[idx] as Map;
     k['ad'] = sonuc['ad'];
+    k['not'] = sonuc['not'];
     if (yil <= 1) {
       k['yil1'] = sonuc['deger'];
     } else {
@@ -435,7 +575,22 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     await _kaydet(yeni);
   }
 
-  // ---------- EKRAN ----------
+  Future<void> _kalemNotGoster(String ad, String not) async {
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(ad),
+        content: Text(not, style: const TextStyle(fontSize: 14, height: 1.5)),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Kapat'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -453,9 +608,21 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text(
-              'Sözleşme Bilgileri',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Sözleşme Bilgileri',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                if (kategoriler.isNotEmpty)
+                  OutlinedButton.icon(
+                    onPressed: () => _exceleAktar(veri),
+                    icon: const Icon(Icons.file_download_outlined, size: 18),
+                    label: const Text('Excel\'e Aktar'),
+                  ),
+              ],
             ),
             const SizedBox(height: 12),
             if (yilSayisi > 1)
@@ -659,6 +826,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     final kategori = kategoriler[kat];
     final kalem = _kalemler(kategori)[idx];
     final kalemAd = (kalem['ad'] ?? '').toString();
+    final kalemNot = (kalem['not'] ?? '').toString();
 
     Widget deger;
     String otomatikIpucu = '';
@@ -763,9 +931,30 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  kalemAd,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        kalemAd,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    if (kalemNot.isNotEmpty) ...[
+                      const SizedBox(width: 4),
+                      InkWell(
+                        onTap: () => _kalemNotGoster(kalemAd, kalemNot),
+                        borderRadius: BorderRadius.circular(20),
+                        child: const Padding(
+                          padding: EdgeInsets.all(2),
+                          child: Icon(
+                            Icons.info_outline,
+                            size: 15,
+                            color: AppRenk.indigo,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 3),
                 deger,

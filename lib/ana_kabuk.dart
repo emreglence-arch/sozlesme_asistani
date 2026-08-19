@@ -6,6 +6,7 @@ import 'guncel_tisler_ekrani.dart';
 import 'ayarlar_ekrani.dart';
 import 'ozel_sayfalar_servisi.dart';
 import 'ozel_sayfa_ekrani.dart';
+import 'hukuki_asistan_ekrani.dart';
 
 class AnaKabuk extends StatefulWidget {
   const AnaKabuk({super.key});
@@ -15,7 +16,6 @@ class AnaKabuk extends StatefulWidget {
 }
 
 class _AnaKabukState extends State<AnaKabuk> {
-  // 0: İşyerleri, 1: Güncel TİS'ler, 2..n: özel sayfalar, son: Ayarlar
   int _secili = 0;
 
   @override
@@ -24,7 +24,7 @@ class _AnaKabukState extends State<AnaKabuk> {
       stream: OzelSayfalarServisi.akis(),
       builder: (context, snap) {
         final ozelSayfalar = snap.data?.docs ?? [];
-        final ayarlarIndex = 2 + ozelSayfalar.length;
+        final ayarlarIndex = 3 + ozelSayfalar.length;
         final secili = _secili.clamp(0, ayarlarIndex);
 
         String baslik;
@@ -36,11 +36,14 @@ class _AnaKabukState extends State<AnaKabuk> {
         } else if (secili == 1) {
           baslik = 'Güncel TİS\'ler';
           icerik = const GuncelTislerEkrani();
+        } else if (secili == 2) {
+          baslik = 'Hukuki Asistan';
+          icerik = const HukukiAsistanEkrani();
         } else if (secili == ayarlarIndex) {
           baslik = 'Ayarlar';
           icerik = const AyarlarEkrani();
         } else {
-          final s = ozelSayfalar[secili - 2];
+          final s = ozelSayfalar[secili - 3];
           final v = s.data();
           final ad = (v['ad'] ?? '').toString();
           baslik = ad;
@@ -157,7 +160,6 @@ class _YanMenu extends StatelessWidget {
             ),
             const Divider(height: 1),
             const SizedBox(height: 12),
-
             Expanded(
               child: ListView(
                 padding: EdgeInsets.zero,
@@ -176,7 +178,13 @@ class _YanMenu extends StatelessWidget {
                     index: 1,
                     renk: AppRenk.indigo,
                   ),
-
+                  _menuOge(
+                    ikon: Icons.balance_outlined,
+                    seciliIkon: Icons.balance,
+                    baslik: 'Hukuki Asistan',
+                    index: 2,
+                    renk: AppRenk.indigo,
+                  ),
                   if (ozelSayfalar.isNotEmpty) ...[
                     const SizedBox(height: 10),
                     Padding(
@@ -200,7 +208,7 @@ class _YanMenu extends StatelessWidget {
                           ozelSayfalar[i].data()['ikon']?.toString(),
                         ),
                         baslik: (ozelSayfalar[i].data()['ad'] ?? '').toString(),
-                        index: 2 + i,
+                        index: 3 + i,
                         renk: Color(
                           (ozelSayfalar[i].data()['renk'] ??
                                   AppRenk.indigo.value)
@@ -208,7 +216,6 @@ class _YanMenu extends StatelessWidget {
                         ),
                       ),
                   ],
-
                   const SizedBox(height: 10),
                   const Divider(indent: 20, endIndent: 20),
                   const SizedBox(height: 4),
@@ -220,19 +227,6 @@ class _YanMenu extends StatelessWidget {
                     renk: AppRenk.indigo,
                   ),
                 ],
-              ),
-            ),
-
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Text(
-                'TÜMTİS',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: Colors.grey.shade400,
-                  letterSpacing: 1.2,
-                  fontWeight: FontWeight.w600,
-                ),
               ),
             ),
           ],

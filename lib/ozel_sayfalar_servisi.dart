@@ -27,6 +27,19 @@ class OzelSayfalarServisi {
       ref().doc(id).update(veri);
 
   static Future<void> sil(String id) => ref().doc(id).delete();
+  static Future<void> yerDegistir(
+    QueryDocumentSnapshot<Map<String, dynamic>> a,
+    QueryDocumentSnapshot<Map<String, dynamic>> b,
+    int aIndex,
+    int bIndex,
+  ) async {
+    final aSira = (a.data()['sira'] ?? aIndex);
+    final bSira = (b.data()['sira'] ?? bIndex);
+    final batch = FirebaseFirestore.instance.batch();
+    batch.update(a.reference, {'sira': bSira});
+    batch.update(b.reference, {'sira': aSira});
+    await batch.commit();
+  }
 }
 
 /// Seçilebilir ikonlar (ad -> IconData)

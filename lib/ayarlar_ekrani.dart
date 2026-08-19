@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'main.dart';
 import 'ayarlar_servisi.dart';
 import 'ozel_sayfalar_servisi.dart';
+import 'asistan_ayarlari_servisi.dart';
+import 'kullanici_servisi.dart';
 
 class AyarlarEkrani extends StatefulWidget {
   const AyarlarEkrani({super.key});
@@ -88,6 +91,143 @@ class _AyarlarEkraniState extends State<AyarlarEkrani> {
       await AyarlarServisi.anahtarKaydet(yeni);
     }
     await _anahtarYukle();
+  }
+
+  // ---------- ASİSTAN ÖRNEK SORULARI ----------
+  Future<void> _soruDialog(List<String> mevcut, {int? index}) async {
+    final duzenle = index != null;
+    final c = TextEditingController(text: duzenle ? mevcut[index] : '');
+    final kaydet = await showDialog<bool>(
+      context: context,
+      builder: (dc) => AlertDialog(
+        title: Text(duzenle ? 'Soruyu Düzenle' : 'Örnek Soru Ekle'),
+        content: SizedBox(
+          width: 460,
+          child: TextField(
+            controller: c,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Soru',
+              hintText: 'Örn. Yakacak yardımı ne kadar?',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dc, false),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dc, true),
+            child: const Text('Kaydet'),
+          ),
+        ],
+      ),
+    );
+    if (kaydet != true || c.text.trim().isEmpty) return;
+    final yeni = List<String>.from(mevcut);
+    if (duzenle) {
+      yeni[index] = c.text.trim();
+    } else {
+      yeni.add(c.text.trim());
+    }
+    await AsistanAyarlariServisi.tisSorulariKaydet(yeni);
+  }
+
+  Future<void> _soruSil(List<String> mevcut, int index) async {
+    final onay = await showDialog<bool>(
+      context: context,
+      builder: (dc) => AlertDialog(
+        title: const Text('Soruyu sil'),
+        content: Text('"${mevcut[index]}" silinsin mi?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dc, false),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dc, true),
+            child: const Text('Sil'),
+          ),
+        ],
+      ),
+    );
+    if (onay != true) return;
+    final yeni = List<String>.from(mevcut)..removeAt(index);
+    await AsistanAyarlariServisi.tisSorulariKaydet(yeni);
+  }
+
+  Future<void> _soruTasi(List<String> mevcut, int index, int yon) async {
+    final hedef = index + yon;
+    if (hedef < 0 || hedef >= mevcut.length) return;
+    final yeni = List<String>.from(mevcut);
+    final t = yeni[index];
+    yeni[index] = yeni[hedef];
+    yeni[hedef] = t;
+    await AsistanAyarlariServisi.tisSorulariKaydet(yeni);
+  }
+
+  // ---------- KULLANICI ONAYI ----------
+  Future<void> _kullaniciOnayla(String uid, String eposta) async {
+    await KullaniciServisi.onayla(uid);
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$eposta onaylandı')));
+    }
+  }
+
+  Future<void> _kullaniciReddet(String uid, String eposta) async {
+    final onay = await showDialog<bool>(
+      context: context,
+      builder: (dc) => AlertDialog(
+        title: const Text('Reddet'),
+        content: Text(
+          '"$eposta" kayıt talebi silinsin mi? (Kişi tekrar kayıt olabilir)',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dc, false),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dc, true),
+            child: const Text('Reddet'),
+          ),
+        ],
+      ),
+    );
+    if (onay != true) return;
+    await KullaniciServisi.reddet(uid);
+  }
+
+  Future<void> _erisimiKaldir(String uid, String eposta) async {
+    final onay = await showDialog<bool>(
+      context: context,
+      builder: (dc) => AlertDialog(
+        title: const Text('Erişimi kaldır'),
+        content: Text(
+          '"$eposta" kullanıcısının erişimi kaldırılsın mı? Tekrar onay bekler.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dc, false),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dc, true),
+            child: const Text('Kaldır'),
+          ),
+        ],
+      ),
+    );
+    if (onay != true) return;
+    await KullaniciServisi.onayiKaldir(uid);
   }
 
   // ---------- ÖZEL SAYFA ----------
@@ -272,9 +412,314 @@ class _AyarlarEkraniState extends State<AyarlarEkrani> {
           ),
           const SizedBox(height: 18),
 
+          // ---- Hesap ----
+          const Text(
+            'Hesap',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 10),
           Card(
             elevation: 0,
             margin: const EdgeInsets.only(bottom: 20),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: ListTile(
+              leading: const Icon(
+                Icons.account_circle_outlined,
+                color: AppRenk.indigo,
+              ),
+              title: Text(
+                FirebaseAuth.instance.currentUser?.email ?? 'Giriş yapıldı',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Oturum açık',
+                style: TextStyle(fontSize: 12.5),
+              ),
+              trailing: TextButton.icon(
+                onPressed: () async {
+                  final onay = await showDialog<bool>(
+                    context: context,
+                    builder: (dc) => AlertDialog(
+                      title: const Text('Çıkış yap'),
+                      content: const Text(
+                        'Oturumu kapatmak istediğinize emin misiniz?',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dc, false),
+                          child: const Text('Vazgeç'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(dc, true),
+                          child: const Text('Çıkış Yap'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (onay == true) {
+                    await FirebaseAuth.instance.signOut();
+                  }
+                },
+                icon: const Icon(Icons.logout, size: 18, color: Colors.red),
+                label: const Text('Çıkış', style: TextStyle(color: Colors.red)),
+              ),
+            ),
+          ),
+
+          // ---- Kullanıcı Yönetimi (sadece yönetici) ----
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: KullaniciServisi.benimKaydim(
+              FirebaseAuth.instance.currentUser?.uid ?? '_',
+            ),
+            builder: (context, benSnap) {
+              final yonetici = benSnap.data?.data()?['yonetici'] == true;
+              if (!yonetici) return const SizedBox.shrink();
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Kullanıcı Yönetimi',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+
+                  StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: KullaniciServisi.bekleyenler(),
+                    builder: (context, snap) {
+                      final bekleyen = snap.data?.docs ?? [];
+                      if (bekleyen.isEmpty) return const SizedBox.shrink();
+                      return Card(
+                        elevation: 0,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.person_add_alt_1,
+                                    size: 19,
+                                    color: AppRenk.amber,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Onay Bekleyenler (${bekleyen.length})',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              ...bekleyen.map((d) {
+                                final eposta = (d.data()['eposta'] ?? '')
+                                    .toString();
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 4,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          eposta,
+                                          style: const TextStyle(
+                                            fontSize: 13.5,
+                                          ),
+                                        ),
+                                      ),
+                                      TextButton.icon(
+                                        onPressed: () =>
+                                            _kullaniciOnayla(d.id, eposta),
+                                        icon: const Icon(
+                                          Icons.check,
+                                          size: 17,
+                                          color: AppRenk.emerald,
+                                        ),
+                                        label: const Text(
+                                          'Onayla',
+                                          style: TextStyle(
+                                            color: AppRenk.emerald,
+                                            fontSize: 12.5,
+                                          ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Reddet',
+                                        icon: const Icon(
+                                          Icons.close,
+                                          size: 18,
+                                          color: Colors.red,
+                                        ),
+                                        onPressed: () =>
+                                            _kullaniciReddet(d.id, eposta),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+
+                  StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: KullaniciServisi.onaylilar(),
+                    builder: (context, snap) {
+                      final onayli = snap.data?.docs ?? [];
+                      return Card(
+                        elevation: 0,
+                        margin: const EdgeInsets.only(bottom: 20),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.group_outlined,
+                                    size: 19,
+                                    color: AppRenk.indigo,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Onaylı Kullanıcılar (${onayli.length})',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              if (onayli.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 6,
+                                  ),
+                                  child: Text(
+                                    'Henüz yok',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey.shade500,
+                                    ),
+                                  ),
+                                )
+                              else
+                                ...onayli.map((d) {
+                                  final eposta = (d.data()['eposta'] ?? '')
+                                      .toString();
+                                  final yon = d.data()['yonetici'] == true;
+                                  final benMiyim =
+                                      d.id ==
+                                      FirebaseAuth.instance.currentUser?.uid;
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 4,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  eposta,
+                                                  style: const TextStyle(
+                                                    fontSize: 13.5,
+                                                  ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              if (yon) ...[
+                                                const SizedBox(width: 6),
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 7,
+                                                        vertical: 1,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: AppRenk.indigo
+                                                        .withOpacity(0.12),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          20,
+                                                        ),
+                                                  ),
+                                                  child: const Text(
+                                                    'yönetici',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: AppRenk.indigo,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                        if (!benMiyim && !yon)
+                                          TextButton(
+                                            onPressed: () =>
+                                                _erisimiKaldir(d.id, eposta),
+                                            child: const Text(
+                                              'Erişimi kaldır',
+                                              style: TextStyle(
+                                                color: Colors.red,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          )
+                                        else if (benMiyim)
+                                          Text(
+                                            '(siz)',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey.shade500,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
+
+          // ---- Asistan Ayarları ----
+          const Text(
+            'Asistan Ayarları',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 10),
+
+          Card(
+            elevation: 0,
+            margin: const EdgeInsets.only(bottom: 12),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
             ),
@@ -301,6 +746,161 @@ class _AyarlarEkraniState extends State<AyarlarEkrani> {
                 child: Text(varMi ? 'Değiştir' : 'Ekle'),
               ),
             ),
+          ),
+
+          StreamBuilder<List<String>>(
+            stream: AsistanAyarlariServisi.tisSorulariAkis(),
+            builder: (context, snap) {
+              final sorular = snap.data ?? [];
+              return Card(
+                elevation: 0,
+                margin: const EdgeInsets.only(bottom: 20),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.help_outline,
+                            size: 20,
+                            color: AppRenk.indigo,
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'TİS Asistanı Örnek Soruları',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => _soruDialog(sorular),
+                            icon: const Icon(Icons.add, size: 17),
+                            label: const Text(
+                              'Ekle',
+                              style: TextStyle(fontSize: 12.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 2, bottom: 4),
+                        child: Text(
+                          'Bu sorular tüm sözleşme asistanlarında öneri olarak görünür.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (sorular.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: Text(
+                            'Henüz örnek soru yok',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        )
+                      else
+                        ...List.generate(sorular.length, (i) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.chevron_right,
+                                  size: 16,
+                                  color: Colors.grey,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    sorular[i],
+                                    style: const TextStyle(fontSize: 13.5),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Yukarı',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 30,
+                                    minHeight: 30,
+                                  ),
+                                  icon: Icon(
+                                    Icons.keyboard_arrow_up,
+                                    size: 19,
+                                    color: i == 0
+                                        ? Colors.grey.shade300
+                                        : Colors.grey,
+                                  ),
+                                  onPressed: i == 0
+                                      ? null
+                                      : () => _soruTasi(sorular, i, -1),
+                                ),
+                                IconButton(
+                                  tooltip: 'Aşağı',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 30,
+                                    minHeight: 30,
+                                  ),
+                                  icon: Icon(
+                                    Icons.keyboard_arrow_down,
+                                    size: 19,
+                                    color: i == sorular.length - 1
+                                        ? Colors.grey.shade300
+                                        : Colors.grey,
+                                  ),
+                                  onPressed: i == sorular.length - 1
+                                      ? null
+                                      : () => _soruTasi(sorular, i, 1),
+                                ),
+                                IconButton(
+                                  tooltip: 'Düzenle',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 30,
+                                    minHeight: 30,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.edit_outlined,
+                                    size: 17,
+                                    color: AppRenk.indigo,
+                                  ),
+                                  onPressed: () =>
+                                      _soruDialog(sorular, index: i),
+                                ),
+                                IconButton(
+                                  tooltip: 'Sil',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 30,
+                                    minHeight: 30,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 17,
+                                    color: Colors.red,
+                                  ),
+                                  onPressed: () => _soruSil(sorular, i),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
 
           // ---- Özel sayfalar ----
@@ -376,7 +976,8 @@ class _AyarlarEkraniState extends State<AyarlarEkrani> {
                       ),
                     )
                   else
-                    ...sayfalar.map((s) {
+                    ...List.generate(sayfalar.length, (i) {
+                      final s = sayfalar[i];
                       final v = s.data();
                       final ad = (v['ad'] ?? '').toString();
                       final renk = Color(
@@ -401,17 +1002,71 @@ class _AyarlarEkraniState extends State<AyarlarEkrani> {
                             ad,
                             style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
-                          trailing: PopupMenuButton<String>(
-                            onSelected: (x) {
-                              if (x == 'duzenle') _sayfaDialog(mevcut: s);
-                              if (x == 'sil') _sayfaSil(s.id, ad);
-                            },
-                            itemBuilder: (context) => const [
-                              PopupMenuItem(
-                                value: 'duzenle',
-                                child: Text('Düzenle'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Yukarı',
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 32,
+                                  minHeight: 32,
+                                ),
+                                icon: Icon(
+                                  Icons.keyboard_arrow_up,
+                                  size: 20,
+                                  color: i == 0
+                                      ? Colors.grey.shade300
+                                      : Colors.grey,
+                                ),
+                                onPressed: i == 0
+                                    ? null
+                                    : () => OzelSayfalarServisi.yerDegistir(
+                                        sayfalar[i],
+                                        sayfalar[i - 1],
+                                        i,
+                                        i - 1,
+                                      ),
                               ),
-                              PopupMenuItem(value: 'sil', child: Text('Sil')),
+                              IconButton(
+                                tooltip: 'Aşağı',
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 32,
+                                  minHeight: 32,
+                                ),
+                                icon: Icon(
+                                  Icons.keyboard_arrow_down,
+                                  size: 20,
+                                  color: i == sayfalar.length - 1
+                                      ? Colors.grey.shade300
+                                      : Colors.grey,
+                                ),
+                                onPressed: i == sayfalar.length - 1
+                                    ? null
+                                    : () => OzelSayfalarServisi.yerDegistir(
+                                        sayfalar[i],
+                                        sayfalar[i + 1],
+                                        i,
+                                        i + 1,
+                                      ),
+                              ),
+                              PopupMenuButton<String>(
+                                onSelected: (x) {
+                                  if (x == 'duzenle') _sayfaDialog(mevcut: s);
+                                  if (x == 'sil') _sayfaSil(s.id, ad);
+                                },
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'duzenle',
+                                    child: Text('Düzenle'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'sil',
+                                    child: Text('Sil'),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
                         ),
@@ -421,46 +1076,7 @@ class _AyarlarEkraniState extends State<AyarlarEkrani> {
               );
             },
           ),
-
-          const SizedBox(height: 20),
-          _yakinda(
-            Icons.table_chart_outlined,
-            'Tabloya Dönüştür',
-            'Sözleşme bilgilerini Excel/PDF olarak çıkar',
-          ),
-          _yakinda(Icons.lock_outline, 'Güvenli Giriş', 'Şifre ile koruma'),
         ],
-      ),
-    );
-  }
-
-  Widget _yakinda(IconData ikon, String baslik, String alt) {
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: ListTile(
-        leading: Icon(ikon, color: AppRenk.indigo),
-        title: Text(
-          baslik,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(alt, style: const TextStyle(fontSize: 12.5)),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-          decoration: BoxDecoration(
-            color: AppRenk.amber.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: const Text(
-            'yakında',
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              color: AppRenk.amber,
-            ),
-          ),
-        ),
       ),
     );
   }

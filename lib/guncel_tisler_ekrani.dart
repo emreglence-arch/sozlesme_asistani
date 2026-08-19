@@ -216,7 +216,7 @@ class _GuncelTislerEkraniState extends State<GuncelTislerEkrani> {
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 30),
                     itemCount: filtreli.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (context, i) => _kart(filtreli[i]),
                   ),
           ),

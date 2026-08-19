@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 
 class TabloWidget extends StatelessWidget {
   final Map<String, dynamic> tablo;
@@ -26,7 +28,6 @@ class TabloWidget extends StatelessWidget {
     return [];
   }
 
-  /// Satırlar Firestore'da {'h': [...]} olarak saklanır (iç içe dizi yasak).
   List<List<String>> get _satirlar {
     final n = _sutunlar.length;
     final raw = tablo['satirlar'];
@@ -47,7 +48,6 @@ class TabloWidget extends StatelessWidget {
     }).toList();
   }
 
-  /// Yazmaya hazır kopya
   Map<String, dynamic> _kopya() => {
     'baslik': (tablo['baslik'] ?? 'Tablo').toString(),
     'sutunlar': _sutunlar.map((s) => Map<String, dynamic>.from(s)).toList(),
@@ -59,6 +59,107 @@ class TabloWidget extends StatelessWidget {
 
   String _tarihMetni(DateTime t) =>
       '${t.day.toString().padLeft(2, '0')}.${t.month.toString().padLeft(2, '0')}.${t.year}';
+
+  // ---------- CSV / EXCEL ----------
+  String _csvHucre(String deger, String tip) {
+    var s = deger;
+    // Sayı sütununda virgüllü ondalığı Excel'in anlaması için nokta yap
+    // (yalnızca tamamen sayıya benziyorsa dokun)
+    // Kaçış: tırnak, noktalı virgül, satır sonu varsa tırnak içine al
+    final ozelKarakterVar =
+        s.contains('"') ||
+        s.contains(';') ||
+        s.contains('\n') ||
+        s.contains(',');
+    if (s.contains('"')) s = s.replaceAll('"', '""');
+    if (ozelKarakterVar) s = '"$s"';
+    return s;
+  }
+
+  Future<void> _exceleAktar(BuildContext context) async {
+    final sutunlar = _sutunlar;
+    final satirlar = _satirlar;
+    if (sutunlar.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Boş tablo aktarılamaz')));
+      return;
+    }
+
+    final baslik = (tablo['baslik'] ?? 'Tablo').toString();
+    final buf = StringBuffer();
+
+    // Başlık satırı
+    buf.writeln(
+      sutunlar
+          .map((s) => _csvHucre((s['ad'] ?? '').toString(), 'metin'))
+          .join(';'),
+    );
+    // Veri satırları
+    for (final satir in satirlar) {
+      final hucreler = <String>[];
+      for (var c = 0; c < sutunlar.length; c++) {
+        final tip = (sutunlar[c]['tip'] ?? 'metin').toString();
+        final deger = c < satir.length ? satir[c] : '';
+        hucreler.add(_csvHucre(deger, tip));
+      }
+      buf.writeln(hucreler.join(';'));
+    }
+
+    // Excel'in Türkçe karakterleri doğru okuması için UTF-8 BOM ekle
+    final bom = [0xEF, 0xBB, 0xBF];
+    final govde = buf.toString().codeUnits;
+    // codeUnits UTF-16 verir; UTF-8'e çevirmek için String'i utf8 encode etmeliyiz
+    final utf8Bytes = _utf8(buf.toString());
+    final bytes = [...bom, ...utf8Bytes];
+
+    // Dosya adı: başlıktan güvenli ad üret
+    var dosyaAdi = baslik.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+    if (dosyaAdi.isEmpty) dosyaAdi = 'tablo';
+
+    try {
+      final hedef = await FilePicker.saveFile(
+        dialogTitle: 'Excel dosyasını kaydet',
+        fileName: '$dosyaAdi.csv',
+      );
+      if (hedef == null) return;
+      await File(hedef).writeAsBytes(bytes);
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Kaydedildi: $dosyaAdi.csv')));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Aktarma hatası: $e')));
+      }
+    }
+  }
+
+  // Basit UTF-8 kodlayıcı (paket gerektirmez)
+  List<int> _utf8(String s) {
+    final out = <int>[];
+    for (final rune in s.runes) {
+      if (rune < 0x80) {
+        out.add(rune);
+      } else if (rune < 0x800) {
+        out.add(0xC0 | (rune >> 6));
+        out.add(0x80 | (rune & 0x3F));
+      } else if (rune < 0x10000) {
+        out.add(0xE0 | (rune >> 12));
+        out.add(0x80 | ((rune >> 6) & 0x3F));
+        out.add(0x80 | (rune & 0x3F));
+      } else {
+        out.add(0xF0 | (rune >> 18));
+        out.add(0x80 | ((rune >> 12) & 0x3F));
+        out.add(0x80 | ((rune >> 6) & 0x3F));
+        out.add(0x80 | (rune & 0x3F));
+      }
+    }
+    return out;
+  }
 
   // ---------- SÜTUN ----------
   Future<void> _sutunDialog(BuildContext context, {int? index}) async {
@@ -336,10 +437,15 @@ class TabloWidget extends StatelessWidget {
                     color: Colors.grey,
                   ),
                   onSelected: (x) {
+                    if (x == 'excel') _exceleAktar(context);
                     if (x == 'baslik') onBaslikDuzenle?.call();
                     if (x == 'sil') onTabloSil?.call();
                   },
                   itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'excel',
+                      child: Text('Excel\'e Aktar'),
+                    ),
                     PopupMenuItem(
                       value: 'baslik',
                       child: Text('Başlığı düzenle'),
@@ -366,7 +472,6 @@ class TabloWidget extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Başlık satırı
                     Container(
                       decoration: BoxDecoration(
                         color: renk.withOpacity(0.07),
@@ -411,7 +516,6 @@ class TabloWidget extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // Veri satırları
                     for (var r = 0; r < satirlar.length; r++)
                       Container(
                         decoration: BoxDecoration(

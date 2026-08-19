@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
-import 'isyeri_sayfasi.dart';
 import 'ana_kabuk.dart';
+import 'giris_ekrani.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'kullanici_servisi.dart';
 
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const SozlesmeAsistaniApp());
+  runApp(const SozlesmeApp());
 }
 
 class AppRenk {
@@ -18,8 +20,8 @@ class AppRenk {
   static const arkaPlan = Color(0xFFF8FAFC);
 }
 
-class SozlesmeAsistaniApp extends StatelessWidget {
-  const SozlesmeAsistaniApp({super.key});
+class SozlesmeApp extends StatelessWidget {
+  const SozlesmeApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -27,229 +29,125 @@ class SozlesmeAsistaniApp extends StatelessWidget {
       title: 'Sözleşme Asistanı',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: AppRenk.indigo),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: AppRenk.indigo,
+          primary: AppRenk.indigo,
+        ),
         scaffoldBackgroundColor: AppRenk.arkaPlan,
         useMaterial3: true,
+        fontFamily: 'Segoe UI',
       ),
-      home: const AnaKabuk(),
+      home: const AuthKapisi(),
     );
   }
 }
 
-class AnaEkran extends StatefulWidget {
-  const AnaEkran({super.key});
-
-  @override
-  State<AnaEkran> createState() => _AnaEkranState();
-}
-
-class _AnaEkranState extends State<AnaEkran> {
-  String _aramaMetni = '';
-
-  Future<void> _isyeriEkle() async {
-    final controller = TextEditingController();
-    final ad = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Yeni İşyeri'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'İşyeri adı',
-            hintText: 'Örn. DHL Supply Chain Lojistik Hizmetler A.Ş.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Vazgeç'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Ekle'),
-          ),
-        ],
-      ),
-    );
-
-    if (ad != null && ad.isNotEmpty) {
-      await FirebaseFirestore.instance.collection('isyerleri').add({
-        'ad': ad,
-        'olusturmaTarihi': FieldValue.serverTimestamp(),
-      });
-    }
-  }
-
-  Future<void> _isyeriSil(String id, String ad) async {
-    final onay = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('İşyerini sil'),
-        content: Text('"$ad" silinsin mi? Bu işlem geri alınamaz.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Vazgeç'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Sil'),
-          ),
-        ],
-      ),
-    );
-    if (onay == true) {
-      await FirebaseFirestore.instance.collection('isyerleri').doc(id).delete();
-    }
-  }
+/// Giriş yapılmış mı diye bakar:
+/// - Yapılmışsa AnaKabuk (uygulama)
+/// - Yapılmamışsa GirisEkrani
+class AuthKapisi extends StatelessWidget {
+  const AuthKapisi({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Sözleşme Asistanı'),
-        backgroundColor: AppRenk.indigo,
-        foregroundColor: Colors.white,
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isyeriEkle,
-        backgroundColor: AppRenk.indigo,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('İşyeri Ekle'),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: TextField(
-              onChanged: (v) => setState(() => _aramaMetni = v.toLowerCase()),
-              decoration: InputDecoration(
-                hintText: 'İşyeri ara (örn. Kühne Nagel)',
-                prefixIcon: const Icon(Icons.search),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('isyerleri')
-                  .orderBy('ad')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text('Hata: ${snapshot.error}'));
-                }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: AppRenk.arkaPlan,
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
 
-                final tumu = snapshot.data!.docs;
-                if (tumu.isEmpty) {
-                  return _bosDurum();
-                }
+        // Giriş yapılmamış → giriş ekranı
+        final user = snapshot.data;
+        if (user == null) {
+          return const GirisEkrani();
+        }
 
-                final liste = tumu.where((d) {
-                  final ad = (d['ad'] as String).toLowerCase();
-                  return ad.contains(_aramaMetni);
-                }).toList();
+        // Giriş yapılmış → onaylı mı diye bak
+        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: KullaniciServisi.benimKaydim(user.uid),
+          builder: (context, kayitSnap) {
+            if (kayitSnap.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                backgroundColor: AppRenk.arkaPlan,
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
 
-                if (liste.isEmpty) {
-                  return const Center(child: Text('Sonuç bulunamadı'));
-                }
+            final veri = kayitSnap.data?.data();
+            final onayli = veri?['onayli'] == true;
 
-                return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
-                  itemCount: liste.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, i) {
-                    final belge = liste[i];
-                    final ad = belge['ad'] as String;
-                    final ilkHarf = ad.isNotEmpty ? ad[0].toUpperCase() : '?';
-                    final veri = belge.data() as Map<String, dynamic>;
-                    final logoUrl = (veri['logoUrl'] ?? '').toString();
-
-                    return Card(
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: AppRenk.indigo,
-                          backgroundImage: logoUrl.isEmpty
-                              ? null
-                              : NetworkImage(logoUrl),
-                          child: logoUrl.isEmpty
-                              ? Text(
-                                  ilkHarf,
-                                  style: const TextStyle(color: Colors.white),
-                                )
-                              : null,
-                        ),
-                        title: Text(
-                          ad,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (deger) {
-                            if (deger == 'sil') {
-                              _isyeriSil(belge.id, ad);
-                            }
-                          },
-                          itemBuilder: (context) => const [
-                            PopupMenuItem(value: 'sil', child: Text('Sil')),
-                          ],
-                        ),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => IsyeriSayfasi(
-                                isyeriId: belge.id,
-                                isyeriAdi: ad,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+            if (onayli) {
+              return const AnaKabuk();
+            }
+            return const OnayBekleniyorEkrani();
+          },
+        );
+      },
     );
   }
+}
 
-  Widget _bosDurum() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.business_outlined, size: 72, color: Colors.grey.shade400),
-          const SizedBox(height: 16),
-          Text(
-            'Henüz işyeri eklenmedi',
-            style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+/// Kayıt olmuş ama henüz onaylanmamış kullanıcıya gösterilir.
+class OnayBekleniyorEkrani extends StatelessWidget {
+  const OnayBekleniyorEkrani({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final eposta = FirebaseAuth.instance.currentUser?.email ?? '';
+    return Scaffold(
+      backgroundColor: AppRenk.arkaPlan,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: AppRenk.amber.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: const Icon(
+                    Icons.hourglass_top,
+                    color: AppRenk.amber,
+                    size: 36,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Onay Bekleniyor',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Hesabınız oluşturuldu ($eposta), ancak erişim için '
+                  'yönetici onayı gerekiyor. Onaylandığında giriş '
+                  'yapabileceksiniz.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                OutlinedButton.icon(
+                  onPressed: () => FirebaseAuth.instance.signOut(),
+                  icon: const Icon(Icons.logout, size: 18),
+                  label: const Text('Çıkış Yap'),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Sağ alttaki "İşyeri Ekle" ile başla',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-          ),
-        ],
+        ),
       ),
     );
   }

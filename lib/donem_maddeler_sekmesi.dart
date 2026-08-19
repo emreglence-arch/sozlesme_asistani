@@ -1,8 +1,8 @@
-import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:archive/archive.dart';
 import 'main.dart';
 import 'paylas.dart';
@@ -43,7 +43,6 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
   Future<void> _kaydet(List<Map<String, dynamic>> m) =>
       _donemRef().update({'maddeler': m});
 
-  // ---------- METNİ MADDELERE BÖL ----------
   List<Map<String, dynamic>> _bolumle(String metin) {
     final satirlar = metin.replaceAll('\r', '').split('\n');
     final sonuc = <Map<String, dynamic>>[];
@@ -52,12 +51,13 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
     final buf = StringBuffer();
 
     final maddeRe = RegExp(r'^\s*MADDE\s*\d+', caseSensitive: false);
-    final bolumRe = RegExp(r'^\s*\d+\s*\.?\s*BÖLÜM', caseSensitive: false);
+    final bolumRe = RegExp(
+      r'^\s*\d+\s*\.?\s*(BÖLÜM|KISIM)',
+      caseSensitive: false,
+    );
 
     void kapat() {
-      if (current != null) {
-        current!['icerik'] = buf.toString().trim();
-      }
+      if (current != null) current['icerik'] = buf.toString().trim();
       buf.clear();
     }
 
@@ -72,88 +72,84 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
       if (maddeRe.hasMatch(satir)) {
         kapat();
         current = {'bolum': currentBolum, 'baslik': satir, 'icerik': ''};
-        sonuc.add(current!);
+        sonuc.add(current);
         continue;
       }
-      if (current != null) {
-        buf.writeln(ham);
-      } else if (satir.isNotEmpty &&
-          currentBolum.isNotEmpty &&
-          satir.length < 60 &&
-          satir == satir.toUpperCase() &&
-          !currentBolum.contains(satir)) {
-        currentBolum = '$currentBolum - $satir';
-      }
+      if (current != null) buf.writeln(ham);
     }
     kapat();
     return sonuc;
   }
 
-  // ---------- WORD (.docx) METNİNİ ÇIKAR ----------
-  String _docxToText(Uint8List bytes) {
-    final arsiv = ZipDecoder().decodeBytes(bytes);
-    final dosya = arsiv.files.firstWhere((f) => f.name == 'word/document.xml');
-    var xml = utf8.decode(dosya.content as List<int>);
-    xml = xml
-        .replaceAll('</w:p>', '\n')
-        .replaceAll('<w:br/>', '\n')
-        .replaceAll('<w:tab/>', '\t');
-    xml = xml.replaceAll(RegExp(r'<[^>]+>'), '');
-    xml = xml
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'");
-    xml = xml.replaceAllMapped(
-      RegExp(r'&#(\d+);'),
-      (m) => String.fromCharCode(int.parse(m.group(1)!)),
+  Future<String?> _wordMetniCek() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['docx'],
+      withData: true,
     );
-    return xml;
+    if (result == null) return null;
+    final bytes = result.files.first.bytes;
+    if (bytes == null) return null;
+
+    try {
+      final arsiv = ZipDecoder().decodeBytes(bytes);
+      for (final dosya in arsiv) {
+        if (dosya.name == 'word/document.xml') {
+          final icerik = utf8.decode(dosya.content as List<int>);
+          return _xmlText(icerik);
+        }
+      }
+    } catch (e) {
+      _bilgi('Word okunamadı: $e');
+    }
+    return null;
   }
 
-  // ---------- YÖNTEM 1: WORD'DEN ----------
-  Future<void> _wordDen(List<Map<String, dynamic>> mevcut) async {
-    if (mevcut.isNotEmpty) {
-      final ok = await _onay(
-        'Maddeleri yenile',
-        'Mevcut maddelerin üzerine Word\'den gelenler yazılacak. Devam edilsin mi?',
-      );
-      if (ok != true) return;
-    }
+  String _xmlText(String xml) {
+    var s = xml;
+    s = s.replaceAll(RegExp(r'</w:p>'), '\n');
+    s = s.replaceAll(RegExp(r'<[^>]+>'), '');
+    s = s.replaceAll('&amp;', '&');
+    s = s.replaceAll('&lt;', '<');
+    s = s.replaceAll('&gt;', '>');
+    s = s.replaceAll('&quot;', '"');
+    s = s.replaceAll('&apos;', "'");
+    return s;
+  }
+
+  Future<void> _wordAktar(List<Map<String, dynamic>> mevcut) async {
     setState(() => _islemde = true);
     try {
-      final ref = FirebaseStorage.instance.ref(
-        'sozlesmeler/${widget.isyeriId}/${widget.donemId}/word',
-      );
-      final bytes = await ref.getData(60 * 1024 * 1024);
-      if (bytes == null) throw 'Word dosyası bulunamadı.';
-      String metin;
-      try {
-        metin = _docxToText(bytes);
-      } catch (_) {
-        throw 'Bu dosya .docx değil (eski .doc olabilir). Lütfen .docx yükleyin ya da "Metni Yapıştır"ı kullanın.';
+      final metin = await _wordMetniCek();
+      if (metin == null || metin.trim().isEmpty) {
+        _bilgi('Metin alınamadı.');
+        return;
       }
       final maddeler = _bolumle(metin);
       if (maddeler.isEmpty) {
-        throw 'Metinde "MADDE" başlığı bulunamadı.';
+        _bilgi('Metinde "MADDE" başlığı bulunamadı.');
+        return;
+      }
+      if (mevcut.isNotEmpty) {
+        final ok = await _onay(
+          'Maddeleri yenile',
+          'Mevcut maddelerin üzerine yazılacak. Devam edilsin mi?',
+        );
+        if (ok != true) return;
       }
       await _kaydet(maddeler);
       _bilgi('${maddeler.length} madde oluşturuldu.');
-    } catch (e) {
-      _bilgi('$e');
     } finally {
       if (mounted) setState(() => _islemde = false);
     }
   }
 
-  // ---------- YÖNTEM 2: YAPIŞTIR ----------
   Future<void> _yapistir(List<Map<String, dynamic>> mevcut) async {
     final c = TextEditingController();
     final metin = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Metni Yapıştır'),
+        title: const Text('TİS Metnini Yapıştır'),
         content: SizedBox(
           width: 500,
           child: TextField(
@@ -162,7 +158,7 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
             maxLines: 12,
             decoration: const InputDecoration(
               hintText:
-                  'Sözleşme metnini buraya yapıştırın.\n(Word\'de Ctrl+A ile seç, Ctrl+C ile kopyala)',
+                  'Sözleşme metnini buraya yapıştırın.\nMADDE 1, MADDE 2... başlıklarına göre bölünür.',
               border: OutlineInputBorder(),
             ),
           ),
@@ -196,7 +192,6 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
     _bilgi('${maddeler.length} madde oluşturuldu.');
   }
 
-  // ---------- YÖNTEM 3: ELLE EKLE / DÜZENLE ----------
   Future<void> _maddeDialog(
     List<Map<String, dynamic>> mevcut, {
     int? index,
@@ -220,8 +215,7 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
                 TextField(
                   controller: bolumC,
                   decoration: const InputDecoration(
-                    labelText: 'Bölüm (opsiyonel)',
-                    hintText: 'Örn. 4. BÖLÜM - ÜCRETLER VE SOSYAL HAKLAR',
+                    labelText: 'Bölüm/Kısım (opsiyonel)',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -229,7 +223,7 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
                   controller: baslikC,
                   decoration: const InputDecoration(
                     labelText: 'Madde başlığı',
-                    hintText: 'Örn. MADDE 37 - ÜCRETLER, SOSYAL HAKLAR',
+                    hintText: 'Örn. MADDE 12 - Ücret Zammı',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -258,9 +252,7 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
       ),
     );
 
-    if (kaydet != true) return;
-    if (baslikC.text.trim().isEmpty) return;
-
+    if (kaydet != true || baslikC.text.trim().isEmpty) return;
     final yeni = mevcut.map((e) => Map<String, dynamic>.from(e)).toList();
     final kayit = {
       'bolum': bolumC.text.trim(),
@@ -283,33 +275,55 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
     await _kaydet(yeni);
   }
 
-  // ---------- YARDIMCI ----------
-  Future<bool?> _onay(String baslik, String metin) {
-    return showDialog<bool>(
+  Future<void> _tumunuSil() async {
+    final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(baslik),
-        content: Text(metin),
+      builder: (dc) => AlertDialog(
+        title: const Text('Tüm metni sil'),
+        content: const Text(
+          'Bu dönemin TİS metnindeki tüm maddeler silinecek. Emin misiniz?',
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dc, false),
             child: const Text('Vazgeç'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Devam'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dc, true),
+            child: const Text('Hepsini Sil'),
           ),
         ],
       ),
     );
+    if (ok != true) return;
+    await _kaydet([]);
+    _bilgi('Tüm maddeler silindi.');
   }
+
+  Future<bool?> _onay(String baslik, String metin) => showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(baslik),
+      content: Text(metin),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Vazgeç'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Devam'),
+        ),
+      ],
+    ),
+  );
 
   void _bilgi(String metin) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(metin)));
   }
 
-  // Aramaya uyan maddelerin ORİJİNAL sıra numaralarını döner
   List<int> _filtreliIndeksler(List<Map<String, dynamic>> maddeler) {
     final sonuc = <int>[];
     for (var i = 0; i < maddeler.length; i++) {
@@ -318,19 +332,14 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
         continue;
       }
       final m = maddeler[i];
-      final baslik = (m['baslik'] ?? '').toString().toLowerCase();
-      final icerik = (m['icerik'] ?? '').toString().toLowerCase();
-      final bolum = (m['bolum'] ?? '').toString().toLowerCase();
-      if (baslik.contains(_arama) ||
-          icerik.contains(_arama) ||
-          bolum.contains(_arama)) {
-        sonuc.add(i);
-      }
+      final hepsi =
+          '${m['baslik'] ?? ''} ${m['icerik'] ?? ''} ${m['bolum'] ?? ''}'
+              .toLowerCase();
+      if (hepsi.contains(_arama)) sonuc.add(i);
     }
     return sonuc;
   }
 
-  // ---------- EKRAN ----------
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -341,7 +350,6 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
         }
         final veri = snapshot.data!.data() ?? {};
         final maddeler = _maddeler(veri);
-        final wordVar = veri['wordUrl'] != null;
         final indeksler = _filtreliIndeksler(maddeler);
 
         return Stack(
@@ -353,17 +361,10 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    FilledButton.icon(
-                      onPressed: wordVar
-                          ? () => _wordDen(maddeler)
-                          : () => _bilgi(
-                              'Önce "Belgeler" sekmesinden Word dosyası yükleyin.',
-                            ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppRenk.indigo,
-                      ),
-                      icon: const Icon(Icons.auto_awesome, size: 18),
-                      label: const Text('Word\'den Oluştur'),
+                    OutlinedButton.icon(
+                      onPressed: () => _wordAktar(maddeler),
+                      icon: const Icon(Icons.upload_file, size: 18),
+                      label: const Text('Word\'den Aktar'),
                     ),
                     OutlinedButton.icon(
                       onPressed: () => _yapistir(maddeler),
@@ -375,6 +376,15 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
                       icon: const Icon(Icons.add, size: 18),
                       label: const Text('Madde Ekle'),
                     ),
+                    if (maddeler.isNotEmpty)
+                      OutlinedButton.icon(
+                        onPressed: _tumunuSil,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.red,
+                        ),
+                        icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                        label: const Text('Tümünü Sil'),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -382,7 +392,7 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
                   TextField(
                     onChanged: (v) => setState(() => _arama = v.toLowerCase()),
                     decoration: InputDecoration(
-                      hintText: 'Madde ara (başlık veya içerik)',
+                      hintText: 'Madde ara',
                       prefixIcon: const Icon(Icons.search),
                       isDense: true,
                       filled: true,
@@ -400,19 +410,9 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 40),
                     child: Center(
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.search_off,
-                            size: 54,
-                            color: Colors.grey.shade400,
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            '"$_arama" için sonuç yok',
-                            style: TextStyle(color: Colors.grey.shade600),
-                          ),
-                        ],
+                      child: Text(
+                        '"$_arama" için sonuç yok',
+                        style: TextStyle(color: Colors.grey.shade600),
                       ),
                     ),
                   )
@@ -445,30 +445,27 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
     );
   }
 
-  Widget _bosDurum() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 60),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.article_outlined, size: 72, color: Colors.grey.shade400),
-            const SizedBox(height: 16),
-            Text(
-              'Henüz madde yok',
-              style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Word\'den oluştur, metni yapıştır ya da elle ekle',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-            ),
-          ],
-        ),
+  Widget _bosDurum() => Padding(
+    padding: const EdgeInsets.only(top: 50),
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.article_outlined, size: 64, color: Colors.grey.shade400),
+          const SizedBox(height: 14),
+          Text(
+            'Henüz madde yok',
+            style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Word\'den aktar, metni yapıştır ya da elle madde ekle',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
 
   List<Widget> _grupluListe(
     List<Map<String, dynamic>> maddeler,

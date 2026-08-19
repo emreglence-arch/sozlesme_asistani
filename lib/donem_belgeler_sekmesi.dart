@@ -249,7 +249,7 @@ class _DonemBelgelerSekmesiState extends State<DonemBelgelerSekmesi> {
                           ),
                         );
                       } else {
-                        _ac(url);
+                        _indir(tur, ad);
                       }
                     },
                   ),

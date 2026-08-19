@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "584233203109",
-    "project_id": "sozlesme-asistani",
-    "storage_bucket": "sozlesme-asistani.firebasestorage.app"
+    "project_number": "864850151301",
+    "project_id": "sendika-yazilimi",
+    "storage_bucket": "sendika-yazilimi.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:584233203109:android:ea23388baa693fd844a44c",
+        "mobilesdk_app_id": "1:864850151301:android:e53e01eb61b15818a9e6ec",
         "android_client_info": {
           "package_name": "com.tumtis.sozlesme_asistani"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBk47VegIGjQAHSvkwBikC9wkXCTgJo9pw"
+          "current_key": "AIzaSyDrXx8FeD9NazX94-jYkgETuy2dscQb5co"
         }
       ],
       "services": {

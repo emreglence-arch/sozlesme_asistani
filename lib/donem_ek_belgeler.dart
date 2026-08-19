@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'main.dart';
 import 'pdf_goruntuleyici.dart';
 import 'paylas.dart';
@@ -94,7 +93,6 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
     return Icons.insert_drive_file;
   }
 
-  // ---------- ORTAK: öneri çipli metin alanı ----------
   Widget _oneriliAlan({
     required TextEditingController controller,
     required String etiket,
@@ -199,7 +197,6 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
     );
   }
 
-  // ---------- EKLE ----------
   Future<void> _belgeEkle() async {
     final bilgi = await _bilgiDialog(
       baslik: 'Belge Ekle',
@@ -221,6 +218,7 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
       await ref.putData(f.bytes!, SettableMetadata(contentType: _ct(f.name)));
       final url = await ref.getDownloadURL();
 
+      final simdi = DateTime.now().millisecondsSinceEpoch;
       await _ref().doc(belgeId).set({
         'ustBaslik': bilgi['ustBaslik'],
         'tur': bilgi['tur'],
@@ -230,6 +228,8 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
         'url': url,
         'depoYolu': ref.fullPath,
         'tarih': FieldValue.serverTimestamp(),
+        'grupSira': simdi,
+        'belgeSira': simdi,
       });
     } catch (e) {
       if (mounted) {
@@ -255,7 +255,6 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
     await _ref().doc(d.id).update(bilgi);
   }
 
-  // ---------- AÇ / İNDİR / SİL ----------
   Future<void> _belgeAc(Map<String, dynamic> v) async {
     final url = (v['url'] ?? '').toString();
     final ad = (v['dosyaAdi'] ?? '').toString();
@@ -267,7 +266,7 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
         ),
       );
     } else {
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      await _belgeIndir(v);
     }
   }
 
@@ -329,7 +328,56 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
     await _ref().doc(d.id).delete();
   }
 
-  // ---------- EKRAN ----------
+  // Bir belgeyi grup içinde komşusuyla yer değiştir
+  Future<void> _belgeTasi(
+    List<DocumentSnapshot<Map<String, dynamic>>> grup,
+    int index,
+    int yon,
+  ) async {
+    final hedef = index + yon;
+    if (hedef < 0 || hedef >= grup.length) return;
+    final a = grup[index];
+    final b = grup[hedef];
+    final aSira = (a.data()?['belgeSira'] ?? index);
+    final bSira = (b.data()?['belgeSira'] ?? hedef);
+    final batch = FirebaseFirestore.instance.batch();
+    batch.update(a.reference, {'belgeSira': bSira});
+    batch.update(b.reference, {'belgeSira': aSira});
+    await batch.commit();
+  }
+
+  // Bir grubu (üst başlığı) tümüyle yukarı/aşağı taşı
+  Future<void> _grupTasi(
+    List<MapEntry<String, List<DocumentSnapshot<Map<String, dynamic>>>>>
+    gruplar,
+    int index,
+    int yon,
+  ) async {
+    final hedef = index + yon;
+    if (hedef < 0 || hedef >= gruplar.length) return;
+
+    // İki grubun grupSira değerlerini bul
+    int grupSiraAl(List<DocumentSnapshot<Map<String, dynamic>>> g) {
+      final s = g.first.data()?['grupSira'];
+      return (s is int) ? s : 1 << 30;
+    }
+
+    final aGrup = gruplar[index].value;
+    final bGrup = gruplar[hedef].value;
+    final aSira = grupSiraAl(aGrup);
+    final bSira = grupSiraAl(bGrup);
+
+    final batch = FirebaseFirestore.instance.batch();
+    // A grubundaki tüm belgelere B'nin sırasını, B'dekilere A'nınkini ver
+    for (final d in aGrup) {
+      batch.update(d.reference, {'grupSira': bSira});
+    }
+    for (final d in bGrup) {
+      batch.update(d.reference, {'grupSira': aSira});
+    }
+    await batch.commit();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -360,7 +408,7 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
         ),
         const SizedBox(height: 4),
         StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _ref().orderBy('tarih', descending: true).snapshots(),
+          stream: _ref().snapshots(),
           builder: (context, snap) {
             if (!snap.hasData) {
               return const Padding(
@@ -370,7 +418,6 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
             }
             final belgeler = snap.data!.docs;
 
-            // Önerileri güncelle (mevcut değerlerden)
             _ustBaslikOneri =
                 belgeler
                     .map((d) => (d.data()['ustBaslik'] ?? '').toString())
@@ -427,61 +474,46 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
             }
 
             // Üst başlığa göre grupla
-            final gruplar =
+            final gruplarMap =
                 <String, List<DocumentSnapshot<Map<String, dynamic>>>>{};
             for (final d in belgeler) {
               final u = (d.data()['ustBaslik'] ?? '').toString().trim();
-              gruplar.putIfAbsent(u.isEmpty ? _genel : u, () => []).add(d);
+              gruplarMap.putIfAbsent(u.isEmpty ? _genel : u, () => []).add(d);
             }
-            final sirali = gruplar.keys.toList()
+
+            // Her grubun içini belgeSira'ya göre sırala
+            for (final list in gruplarMap.values) {
+              list.sort((a, b) {
+                final sa = (a.data()?['belgeSira'] is int)
+                    ? a.data()!['belgeSira'] as int
+                    : 1 << 30;
+                final sb = (b.data()?['belgeSira'] is int)
+                    ? b.data()!['belgeSira'] as int
+                    : 1 << 30;
+                return sa.compareTo(sb);
+              });
+            }
+
+            // Grupları grupSira'ya göre sırala (Genel en sona)
+            final gruplar = gruplarMap.entries.toList()
               ..sort((a, b) {
-                if (a == _genel) return 1;
-                if (b == _genel) return -1;
-                return a.compareTo(b);
+                if (a.key == _genel) return 1;
+                if (b.key == _genel) return -1;
+                int gs(List<DocumentSnapshot<Map<String, dynamic>>> g) {
+                  final s = g.first.data()?['grupSira'];
+                  return (s is int) ? s : 1 << 30;
+                }
+
+                return gs(a.value).compareTo(gs(b.value));
               });
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final g in sirali) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
-                    child: Row(
-                      children: [
-                        Text(
-                          g.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.6,
-                            color: g == _genel
-                                ? Colors.grey.shade500
-                                : AppRenk.indigo,
-                          ),
-                        ),
-                        const SizedBox(width: 7),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade200,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            '${gruplar[g]!.length}',
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.grey.shade700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ...gruplar[g]!.map((d) => _belgeKarti(d)),
+                for (var gi = 0; gi < gruplar.length; gi++) ...[
+                  _grupBasligi(gruplar, gi),
+                  for (var bi = 0; bi < gruplar[gi].value.length; bi++)
+                    _belgeKarti(gruplar[gi].value, bi),
                 ],
               ],
             );
@@ -491,7 +523,84 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
     );
   }
 
-  Widget _belgeKarti(DocumentSnapshot<Map<String, dynamic>> d) {
+  Widget _grupBasligi(
+    List<MapEntry<String, List<DocumentSnapshot<Map<String, dynamic>>>>>
+    gruplar,
+    int gi,
+  ) {
+    final g = gruplar[gi];
+    final genel = g.key == _genel;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
+      child: Row(
+        children: [
+          Text(
+            g.key.toUpperCase(),
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+              color: genel ? Colors.grey.shade500 : AppRenk.indigo,
+            ),
+          ),
+          const SizedBox(width: 7),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '${g.value.length}',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ),
+          const Spacer(),
+          // Grubu taşıma okları (Genel taşınmaz)
+          if (!genel) ...[
+            IconButton(
+              tooltip: 'Grubu yukarı',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+              icon: Icon(
+                Icons.keyboard_double_arrow_up,
+                size: 19,
+                color: gi == 0 ? Colors.grey.shade300 : AppRenk.indigo,
+              ),
+              onPressed: gi == 0 ? null : () => _grupTasi(gruplar, gi, -1),
+            ),
+            IconButton(
+              tooltip: 'Grubu aşağı',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+              icon: Icon(
+                Icons.keyboard_double_arrow_down,
+                size: 19,
+                color:
+                    (gi == gruplar.length - 1 || gruplar[gi + 1].key == _genel)
+                    ? Colors.grey.shade300
+                    : AppRenk.indigo,
+              ),
+              onPressed:
+                  (gi == gruplar.length - 1 || gruplar[gi + 1].key == _genel)
+                  ? null
+                  : () => _grupTasi(gruplar, gi, 1),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _belgeKarti(
+    List<DocumentSnapshot<Map<String, dynamic>>> grup,
+    int index,
+  ) {
+    final d = grup[index];
     final v = d.data()!;
     final tur = (v['tur'] ?? '').toString();
     final aciklama = (v['aciklama'] ?? '').toString();
@@ -574,14 +683,45 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
                   ],
                 ),
               ),
-              IconButton(
-                tooltip: 'İndir',
-                icon: const Icon(
-                  Icons.download,
-                  color: AppRenk.emerald,
-                  size: 20,
-                ),
-                onPressed: () => _belgeIndir(v),
+              // Belge sıralama okları
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Yukarı',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 28,
+                      minHeight: 26,
+                    ),
+                    icon: Icon(
+                      Icons.keyboard_arrow_up,
+                      size: 18,
+                      color: index == 0 ? Colors.grey.shade300 : Colors.grey,
+                    ),
+                    onPressed: index == 0
+                        ? null
+                        : () => _belgeTasi(grup, index, -1),
+                  ),
+                  IconButton(
+                    tooltip: 'Aşağı',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 28,
+                      minHeight: 26,
+                    ),
+                    icon: Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 18,
+                      color: index == grup.length - 1
+                          ? Colors.grey.shade300
+                          : Colors.grey,
+                    ),
+                    onPressed: index == grup.length - 1
+                        ? null
+                        : () => _belgeTasi(grup, index, 1),
+                  ),
+                ],
               ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),

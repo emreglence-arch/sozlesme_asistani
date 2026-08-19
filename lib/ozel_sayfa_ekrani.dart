@@ -14,11 +14,7 @@ class OzelSayfaEkrani extends StatefulWidget {
   final String sayfaAdi;
   final Color renk;
   final IconData ikon;
-
-  /// Verinin yazılacağı kök belge. Boşsa ozelSayfalar/{sayfaId} kullanılır.
   final DocumentReference<Map<String, dynamic>>? kokRef;
-
-  /// Başlık ve ikonu üstte gösterelim mi? (sekme içinde kullanılırken gizlenir)
   final bool basligiGoster;
 
   const OzelSayfaEkrani({
@@ -52,6 +48,7 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
   }
 
   String? get _aktifKlasorId => _yol.last.id;
+  String get _aktifKlasorKey => _yol.last.id ?? '_kok';
 
   DocumentReference<Map<String, dynamic>> _sayfaRef() =>
       widget.kokRef ??
@@ -228,6 +225,7 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
   // ---------- KLASÖR ----------
   Future<void> _klasorDialog({
     DocumentSnapshot<Map<String, dynamic>>? mevcut,
+    int siradaki = 0,
   }) async {
     final c = TextEditingController(
       text: (mevcut?.data()?['ad'] ?? '').toString(),
@@ -268,7 +266,8 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
     if (mevcut == null) {
       await _klasorlerRef().add({
         'ad': c.text.trim(),
-        'ustKlasorId': _aktifKlasorId,
+        'ustKlasorId': _aktifKlasorKey,
+        'sira': siradaki,
         'olusturma': FieldValue.serverTimestamp(),
       });
     } else {
@@ -308,9 +307,45 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
     if (mounted) setState(() => _yukleniyor = false);
   }
 
+  // Klasörü komşusuyla yer değiştir
+  Future<void> _klasorTasi(
+    List<DocumentSnapshot<Map<String, dynamic>>> klasorler,
+    int index,
+    int yon,
+  ) async {
+    final hedef = index + yon;
+    if (hedef < 0 || hedef >= klasorler.length) return;
+    final a = klasorler[index];
+    final b = klasorler[hedef];
+    final aSira = (a.data()?['sira'] ?? index) as int;
+    final bSira = (b.data()?['sira'] ?? hedef) as int;
+    final batch = FirebaseFirestore.instance.batch();
+    batch.update(a.reference, {'sira': bSira});
+    batch.update(b.reference, {'sira': aSira});
+    await batch.commit();
+  }
+
+  Future<void> _kayitTasi(
+    List<DocumentSnapshot<Map<String, dynamic>>> kayitlar,
+    int index,
+    int yon,
+  ) async {
+    final hedef = index + yon;
+    if (hedef < 0 || hedef >= kayitlar.length) return;
+    final a = kayitlar[index];
+    final b = kayitlar[hedef];
+    final aSira = (a.data()?['sira'] ?? index) as int;
+    final bSira = (b.data()?['sira'] ?? hedef) as int;
+    final batch = FirebaseFirestore.instance.batch();
+    batch.update(a.reference, {'sira': bSira});
+    batch.update(b.reference, {'sira': aSira});
+    await batch.commit();
+  }
+
   // ---------- KAYIT ----------
   Future<void> _kayitDialog({
     DocumentSnapshot<Map<String, dynamic>>? mevcut,
+    int siradaki = 0,
   }) async {
     final v = mevcut?.data() ?? {};
     final baslikC = TextEditingController(text: (v['baslik'] ?? '').toString());
@@ -491,8 +526,11 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
         'aciklama': aciklamaC.text.trim(),
         'etiket': etiketC.text.trim(),
         'tarih': Timestamp.fromDate(tarih),
-        'klasorId': mevcut == null ? _aktifKlasorId : v['klasorId'],
+        'klasorId': mevcut == null
+            ? _aktifKlasorKey
+            : (v['klasorId'] ?? '_kok'),
       };
+      if (mevcut == null) kayit['sira'] = siradaki;
 
       if (yeniDosya != null) {
         if (mevcut != null) await _kayitDosyaSil(v);
@@ -626,7 +664,11 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
         children: [
           FloatingActionButton.small(
             heroTag: 'klasor',
-            onPressed: () => _klasorDialog(),
+            onPressed: () {
+              // siradaki değeri build içinde hesaplanamadığı için ekleme
+              // anında en sona koymak yeterli; _klasorDialog kendi sırasını alır
+              _klasorDialog(siradaki: DateTime.now().millisecondsSinceEpoch);
+            },
             backgroundColor: Colors.white,
             foregroundColor: widget.renk,
             tooltip: 'Klasör Ekle',
@@ -635,7 +677,8 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
           const SizedBox(height: 10),
           FloatingActionButton.extended(
             heroTag: 'kayit',
-            onPressed: () => _kayitDialog(),
+            onPressed: () =>
+                _kayitDialog(siradaki: DateTime.now().millisecondsSinceEpoch),
             backgroundColor: widget.renk,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.add),
@@ -676,7 +719,7 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
                 ),
               if (_yol.length > 1)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
@@ -746,27 +789,36 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
 
         return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
           stream: _klasorlerRef()
-              .where('ustKlasorId', isEqualTo: _aktifKlasorId)
+              .where('ustKlasorId', isEqualTo: _aktifKlasorKey)
               .snapshots(),
           builder: (context, klasorSnap) {
             return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: _kayitlarRef()
-                  .where('klasorId', isEqualTo: _aktifKlasorId)
+                  .where('klasorId', isEqualTo: _aktifKlasorKey)
                   .snapshots(),
               builder: (context, kayitSnap) {
                 if (!klasorSnap.hasData || !kayitSnap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
+                int siraAl(DocumentSnapshot<Map<String, dynamic>> d) {
+                  final s = d.data()?['sira'];
+                  return (s is int) ? s : 1 << 30;
+                }
+
                 final klasorler = klasorSnap.data!.docs.toList()
-                  ..sort(
-                    (a, b) => (a.data()['ad'] ?? '').toString().compareTo(
+                  ..sort((a, b) {
+                    final sa = siraAl(a), sb = siraAl(b);
+                    if (sa != sb) return sa.compareTo(sb);
+                    return (a.data()['ad'] ?? '').toString().compareTo(
                       (b.data()['ad'] ?? '').toString(),
-                    ),
-                  );
+                    );
+                  });
 
                 final kayitlar = kayitSnap.data!.docs.toList()
                   ..sort((a, b) {
+                    final sa = siraAl(a), sb = siraAl(b);
+                    if (sa != sb) return sa.compareTo(sb);
                     final ta = (a.data()['tarih'] as Timestamp?)?.toDate();
                     final tb = (b.data()['tarih'] as Timestamp?)?.toDate();
                     if (ta == null || tb == null) return 0;
@@ -808,7 +860,6 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
                       ],
                     ),
                     const SizedBox(height: 6),
-
                     if (metin.isNotEmpty)
                       Card(
                         elevation: 0,
@@ -836,22 +887,21 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
                           ),
                         ),
                       ),
-
                     for (var i = 0; i < tablolar.length; i++)
                       TabloWidget(
-                        key: ValueKey('tablo_${_aktifKlasorId}_$i'),
+                        key: ValueKey('tablo_${_aktifKlasorKey}_$i'),
                         tablo: tablolar[i],
                         renk: widget.renk,
                         onDegisti: (t) => _tabloKaydet(tablolar, i, t),
                         onBaslikDuzenle: () => _tabloBaslikDuzenle(tablolar, i),
                         onTabloSil: () => _tabloSil(tablolar, i),
                       ),
-
-                    ...klasorler.map((k) => _klasorKarti(k)),
+                    for (var i = 0; i < klasorler.length; i++)
+                      _klasorKarti(klasorler, i),
                     if (klasorler.isNotEmpty && kayitlar.isNotEmpty)
                       const SizedBox(height: 14),
-                    ...kayitlar.map((k) => _kayitKarti(k)),
-
+                    for (var i = 0; i < kayitlar.length; i++)
+                      _kayitKarti(kayitlar, i),
                     if (bosMu)
                       Padding(
                         padding: const EdgeInsets.only(top: 60),
@@ -867,7 +917,11 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
     );
   }
 
-  Widget _klasorKarti(DocumentSnapshot<Map<String, dynamic>> k) {
+  Widget _klasorKarti(
+    List<DocumentSnapshot<Map<String, dynamic>>> klasorler,
+    int index,
+  ) {
+    final k = klasorler[index];
     final ad = (k.data()!['ad'] ?? '').toString();
     return Card(
       elevation: 0,
@@ -879,6 +933,34 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            IconButton(
+              tooltip: 'Yukarı',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: Icon(
+                Icons.keyboard_arrow_up,
+                size: 20,
+                color: index == 0 ? Colors.grey.shade300 : Colors.grey,
+              ),
+              onPressed: index == 0
+                  ? null
+                  : () => _klasorTasi(klasorler, index, -1),
+            ),
+            IconButton(
+              tooltip: 'Aşağı',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: Icon(
+                Icons.keyboard_arrow_down,
+                size: 20,
+                color: index == klasorler.length - 1
+                    ? Colors.grey.shade300
+                    : Colors.grey,
+              ),
+              onPressed: index == klasorler.length - 1
+                  ? null
+                  : () => _klasorTasi(klasorler, index, 1),
+            ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
               onSelected: (x) {
@@ -890,7 +972,6 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
                 PopupMenuItem(value: 'sil', child: Text('Sil')),
               ],
             ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
           ],
         ),
         onTap: () => _klasoreGir(k.id, ad),
@@ -898,7 +979,11 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
     );
   }
 
-  Widget _kayitKarti(DocumentSnapshot<Map<String, dynamic>> d) {
+  Widget _kayitKarti(
+    List<DocumentSnapshot<Map<String, dynamic>>> kayitlar,
+    int index,
+  ) {
+    final d = kayitlar[index];
     final v = d.data()!;
     final baslik = (v['baslik'] ?? '').toString();
     final aciklama = (v['aciklama'] ?? '').toString();
@@ -996,29 +1081,87 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
-                onSelected: (x) {
-                  if (x == 'ac') _dosyaAc(v);
-                  if (x == 'indir') _dosyaIndir(v);
-                  if (x == 'paylas') {
-                    final url = (v['url'] ?? '').toString();
-                    Paylas.menu(
-                      context,
-                      url.isEmpty ? '$baslik\n$aciklama' : '$baslik\n$url',
-                    );
-                  }
-                  if (x == 'duzenle') _kayitDialog(mevcut: d);
-                  if (x == 'sil') _kayitSil(d);
-                },
-                itemBuilder: (context) => [
-                  if (dosyaVar)
-                    const PopupMenuItem(value: 'ac', child: Text('Aç')),
-                  if (dosyaVar)
-                    const PopupMenuItem(value: 'indir', child: Text('İndir')),
-                  const PopupMenuItem(value: 'paylas', child: Text('Paylaş')),
-                  const PopupMenuItem(value: 'duzenle', child: Text('Düzenle')),
-                  const PopupMenuItem(value: 'sil', child: Text('Sil')),
+              Column(
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Yukarı',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 30,
+                          minHeight: 28,
+                        ),
+                        icon: Icon(
+                          Icons.keyboard_arrow_up,
+                          size: 19,
+                          color: index == 0
+                              ? Colors.grey.shade300
+                              : Colors.grey,
+                        ),
+                        onPressed: index == 0
+                            ? null
+                            : () => _kayitTasi(kayitlar, index, -1),
+                      ),
+                      IconButton(
+                        tooltip: 'Aşağı',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 30,
+                          minHeight: 28,
+                        ),
+                        icon: Icon(
+                          Icons.keyboard_arrow_down,
+                          size: 19,
+                          color: index == kayitlar.length - 1
+                              ? Colors.grey.shade300
+                              : Colors.grey,
+                        ),
+                        onPressed: index == kayitlar.length - 1
+                            ? null
+                            : () => _kayitTasi(kayitlar, index, 1),
+                      ),
+                    ],
+                  ),
+                  PopupMenuButton<String>(
+                    icon: const Icon(
+                      Icons.more_vert,
+                      size: 20,
+                      color: Colors.grey,
+                    ),
+                    onSelected: (x) {
+                      if (x == 'ac') _dosyaAc(v);
+                      if (x == 'indir') _dosyaIndir(v);
+                      if (x == 'paylas') {
+                        final url = (v['url'] ?? '').toString();
+                        Paylas.menu(
+                          context,
+                          url.isEmpty ? '$baslik\n$aciklama' : '$baslik\n$url',
+                        );
+                      }
+                      if (x == 'duzenle') _kayitDialog(mevcut: d);
+                      if (x == 'sil') _kayitSil(d);
+                    },
+                    itemBuilder: (context) => [
+                      if (dosyaVar)
+                        const PopupMenuItem(value: 'ac', child: Text('Aç')),
+                      if (dosyaVar)
+                        const PopupMenuItem(
+                          value: 'indir',
+                          child: Text('İndir'),
+                        ),
+                      const PopupMenuItem(
+                        value: 'paylas',
+                        child: Text('Paylaş'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'duzenle',
+                        child: Text('Düzenle'),
+                      ),
+                      const PopupMenuItem(value: 'sil', child: Text('Sil')),
+                    ],
+                  ),
                 ],
               ),
             ],

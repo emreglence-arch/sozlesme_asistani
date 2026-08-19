@@ -50,19 +50,20 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBk47VegIGjQAHSvkwBikC9wkXCTgJo9pw',
-    appId: '1:584233203109:android:ea23388baa693fd844a44c',
-    messagingSenderId: '584233203109',
-    projectId: 'sozlesme-asistani',
-    storageBucket: 'sozlesme-asistani.firebasestorage.app',
+    apiKey: 'AIzaSyDrXx8FeD9NazX94-jYkgETuy2dscQb5co',
+    appId: '1:864850151301:android:e53e01eb61b15818a9e6ec',
+    messagingSenderId: '864850151301',
+    projectId: 'sendika-yazilimi',
+    storageBucket: 'sendika-yazilimi.firebasestorage.app',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyCFxByRiqeTMaUGUim5c4RYrnO3JUqY4Lc',
-    appId: '1:584233203109:web:dc7b5cb8dafa6bb944a44c',
-    messagingSenderId: '584233203109',
-    projectId: 'sozlesme-asistani',
-    authDomain: 'sozlesme-asistani.firebaseapp.com',
-    storageBucket: 'sozlesme-asistani.firebasestorage.app',
+    apiKey: 'AIzaSyBCj7j8W0cx1DEciJ0RUREZ7yVy5L2i3i0',
+    appId: '1:864850151301:web:2cec260ffa704600a9e6ec',
+    messagingSenderId: '864850151301',
+    projectId: 'sendika-yazilimi',
+    authDomain: 'sendika-yazilimi.firebaseapp.com',
+    storageBucket: 'sendika-yazilimi.firebasestorage.app',
   );
+
 }
