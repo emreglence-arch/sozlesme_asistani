@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'main.dart';
 import 'pdf_goruntuleyici.dart';
 import 'donem_ek_belgeler.dart';
+import 'dosya_kaydet.dart';
 
 class DonemBelgelerSekmesi extends StatefulWidget {
   final String isyeriId;
@@ -74,21 +75,16 @@ class _DonemBelgelerSekmesiState extends State<DonemBelgelerSekmesi> {
   Future<void> _indir(String tur, String? ad) async {
     final dosyaAdi = (ad == null || ad.isEmpty) ? 'belge' : ad;
     try {
-      final yol = await FilePicker.saveFile(
-        dialogTitle: 'Nereye kaydedilsin?',
-        fileName: dosyaAdi,
-      );
-      if (yol == null) return;
       final bytes = await FirebaseStorage.instance
           .ref(_depoYolu(tur))
           .getData(200 * 1024 * 1024);
       if (bytes == null) throw 'Dosya okunamadı';
-      await File(yol).writeAsBytes(bytes);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('İndirildi: $dosyaAdi')));
-      }
+      await dosyaKaydet(
+        context: context,
+        bytes: bytes,
+        dosyaAdi: dosyaAdi,
+        dialogBaslik: 'Nereye kaydedilsin?',
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

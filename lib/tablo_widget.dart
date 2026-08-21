@@ -1,6 +1,5 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
+import 'dosya_kaydet.dart';
 
 class TabloWidget extends StatelessWidget {
   final Map<String, dynamic> tablo;
@@ -63,9 +62,6 @@ class TabloWidget extends StatelessWidget {
   // ---------- CSV / EXCEL ----------
   String _csvHucre(String deger, String tip) {
     var s = deger;
-    // Sayı sütununda virgüllü ondalığı Excel'in anlaması için nokta yap
-    // (yalnızca tamamen sayıya benziyorsa dokun)
-    // Kaçış: tırnak, noktalı virgül, satır sonu varsa tırnak içine al
     final ozelKarakterVar =
         s.contains('"') ||
         s.contains(';') ||
@@ -89,13 +85,11 @@ class TabloWidget extends StatelessWidget {
     final baslik = (tablo['baslik'] ?? 'Tablo').toString();
     final buf = StringBuffer();
 
-    // Başlık satırı
     buf.writeln(
       sutunlar
           .map((s) => _csvHucre((s['ad'] ?? '').toString(), 'metin'))
           .join(';'),
     );
-    // Veri satırları
     for (final satir in satirlar) {
       final hucreler = <String>[];
       for (var c = 0; c < sutunlar.length; c++) {
@@ -106,36 +100,18 @@ class TabloWidget extends StatelessWidget {
       buf.writeln(hucreler.join(';'));
     }
 
-    // Excel'in Türkçe karakterleri doğru okuması için UTF-8 BOM ekle
     final bom = [0xEF, 0xBB, 0xBF];
-    final govde = buf.toString().codeUnits;
-    // codeUnits UTF-16 verir; UTF-8'e çevirmek için String'i utf8 encode etmeliyiz
-    final utf8Bytes = _utf8(buf.toString());
-    final bytes = [...bom, ...utf8Bytes];
+    final bytes = [...bom, ..._utf8(buf.toString())];
 
-    // Dosya adı: başlıktan güvenli ad üret
     var dosyaAdi = baslik.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
     if (dosyaAdi.isEmpty) dosyaAdi = 'tablo';
 
-    try {
-      final hedef = await FilePicker.saveFile(
-        dialogTitle: 'Excel dosyasını kaydet',
-        fileName: '$dosyaAdi.csv',
-      );
-      if (hedef == null) return;
-      await File(hedef).writeAsBytes(bytes);
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Kaydedildi: $dosyaAdi.csv')));
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Aktarma hatası: $e')));
-      }
-    }
+    await dosyaKaydet(
+      context: context,
+      bytes: bytes,
+      dosyaAdi: '$dosyaAdi.csv',
+      dialogBaslik: 'Excel dosyasını kaydet',
+    );
   }
 
   // Basit UTF-8 kodlayıcı (paket gerektirmez)

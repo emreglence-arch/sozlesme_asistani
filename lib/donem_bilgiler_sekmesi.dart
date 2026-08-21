@@ -1,8 +1,7 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:file_picker/file_picker.dart';
 import 'main.dart';
+import 'dosya_kaydet.dart';
 
 const Map<String, List<String>> presetKategoriler = {
   'ÜCRETLER': ['Ücret Zammı', 'İkramiye (Yıllık)', 'Promosyon'],
@@ -232,7 +231,6 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     final yilSayisi = _yilSayisi(veri);
     final buf = StringBuffer();
 
-    // Başlık satırı: Kategori ; Kalem ; 1. Yıl ; 2. Yıl ... ; Not
     final basliklar = <String>['Kategori', 'Kalem'];
     for (var y = 1; y <= yilSayisi; y++) {
       basliklar.add(_yilEtiketi(veri, y));
@@ -247,7 +245,6 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
           ? Map<String, dynamic>.from(kategori['zamlar'])
           : {};
 
-      // Zam oranı satırı (direkt olmayan kategoriler için, çok yıllıysa)
       if (!direkt && yilSayisi > 1) {
         final satir = <String>[ad, 'Yıllık Zam Oranı'];
         for (var y = 1; y <= yilSayisi; y++) {
@@ -264,7 +261,6 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         buf.writeln(satir.map(_csvHucre).join(';'));
       }
 
-      // Kalem satırları
       for (final kalem in _kalemler(kategori)) {
         final kalemAd = (kalem['ad'] ?? '').toString();
         final kalemNot = (kalem['not'] ?? '').toString();
@@ -290,25 +286,12 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     final bom = [0xEF, 0xBB, 0xBF];
     final bytes = [...bom, ..._utf8(buf.toString())];
 
-    try {
-      final hedef = await FilePicker.saveFile(
-        dialogTitle: 'Excel dosyasını kaydet',
-        fileName: 'sozlesme_ozeti.csv',
-      );
-      if (hedef == null) return;
-      await File(hedef).writeAsBytes(bytes);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Kaydedildi: sozlesme_ozeti.csv')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Aktarma hatası: $e')));
-      }
-    }
+    await dosyaKaydet(
+      context: context,
+      bytes: bytes,
+      dosyaAdi: 'sozlesme_ozeti.csv',
+      dialogBaslik: 'Excel dosyasını kaydet',
+    );
   }
 
   Future<bool?> _onayDialog(String baslik, String metin) {

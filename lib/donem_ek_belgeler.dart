@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'main.dart';
 import 'pdf_goruntuleyici.dart';
 import 'paylas.dart';
+import 'dosya_kaydet.dart';
 
 const _paletRenkler = [
   AppRenk.emerald,
@@ -275,21 +276,16 @@ class _DonemEkBelgelerState extends State<DonemEkBelgeler> {
     final yol = (v['depoYolu'] ?? '').toString();
     if (yol.isEmpty) return;
     try {
-      final hedef = await FilePicker.saveFile(
-        dialogTitle: 'Nereye kaydedilsin?',
-        fileName: ad,
-      );
-      if (hedef == null) return;
       final bytes = await FirebaseStorage.instance
           .ref(yol)
           .getData(200 * 1024 * 1024);
       if (bytes == null) throw 'Dosya okunamadı';
-      await File(hedef).writeAsBytes(bytes);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('İndirildi: $ad')));
-      }
+      await dosyaKaydet(
+        context: context,
+        bytes: bytes,
+        dosyaAdi: ad,
+        dialogBaslik: 'Nereye kaydedilsin?',
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

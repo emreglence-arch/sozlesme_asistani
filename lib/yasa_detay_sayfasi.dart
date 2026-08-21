@@ -1001,42 +1001,45 @@ $baglam
     ),
   );
 
-  Widget _girisAlani() => Container(
-    padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-    color: AppRenk.arkaPlan,
-    child: Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: _soruC,
-            enabled: !_bekleniyor,
-            onSubmitted: _sor,
-            textInputAction: TextInputAction.send,
-            decoration: InputDecoration(
-              hintText: 'Yasaya dair bir soru sorun...',
-              filled: true,
-              fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide.none,
+  Widget _girisAlani() => SafeArea(
+    top: false,
+    child: Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+      color: AppRenk.arkaPlan,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _soruC,
+              enabled: !_bekleniyor,
+              onSubmitted: _sor,
+              textInputAction: TextInputAction.send,
+              decoration: InputDecoration(
+                hintText: 'Yasaya dair bir soru sorun...',
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
               ),
             ),
           ),
-        ),
-        const SizedBox(width: 8),
-        FilledButton(
-          onPressed: _bekleniyor ? null : () => _sor(_soruC.text),
-          style: FilledButton.styleFrom(
-            backgroundColor: AppRenk.indigo,
-            padding: const EdgeInsets.all(16),
+          const SizedBox(width: 8),
+          FilledButton(
+            onPressed: _bekleniyor ? null : () => _sor(_soruC.text),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppRenk.indigo,
+              padding: const EdgeInsets.all(16),
+            ),
+            child: const Icon(Icons.send, size: 20),
           ),
-          child: const Icon(Icons.send, size: 20),
-        ),
-      ],
+        ],
+      ),
     ),
   );
 }
