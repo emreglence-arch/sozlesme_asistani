@@ -356,36 +356,79 @@ class _DonemMaddelerSekmesiState extends State<DonemMaddelerSekmesi> {
             ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: () => _wordAktar(maddeler),
-                      icon: const Icon(Icons.upload_file, size: 18),
-                      label: const Text('Word\'den Aktar'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _yapistir(maddeler),
-                      icon: const Icon(Icons.content_paste, size: 18),
-                      label: const Text('Metni Yapıştır'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _maddeDialog(maddeler),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Madde Ekle'),
-                    ),
-                    if (maddeler.isNotEmpty)
-                      OutlinedButton.icon(
-                        onPressed: _tumunuSil,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert),
+                    tooltip: 'İşlemler',
+                    onSelected: (x) {
+                      if (x == 'word') _wordAktar(maddeler);
+                      if (x == 'yapistir') _yapistir(maddeler);
+                      if (x == 'ekle') _maddeDialog(maddeler);
+                      if (x == 'tumunuSil') _tumunuSil();
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'word',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.upload_file,
+                              size: 19,
+                              color: AppRenk.indigo,
+                            ),
+                            SizedBox(width: 12),
+                            Text('Word\'den Aktar'),
+                          ],
                         ),
-                        icon: const Icon(Icons.delete_sweep_outlined, size: 18),
-                        label: const Text('Tümünü Sil'),
                       ),
-                  ],
+                      const PopupMenuItem(
+                        value: 'yapistir',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.content_paste,
+                              size: 19,
+                              color: AppRenk.indigo,
+                            ),
+                            SizedBox(width: 12),
+                            Text('Metni Yapıştır'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'ekle',
+                        child: Row(
+                          children: [
+                            Icon(Icons.add, size: 19, color: AppRenk.indigo),
+                            SizedBox(width: 12),
+                            Text('Madde Ekle'),
+                          ],
+                        ),
+                      ),
+                      if (maddeler.isNotEmpty) const PopupMenuDivider(),
+                      if (maddeler.isNotEmpty)
+                        const PopupMenuItem(
+                          value: 'tumunuSil',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.delete_sweep_outlined,
+                                size: 19,
+                                color: Colors.red,
+                              ),
+                              SizedBox(width: 12),
+                              Text(
+                                'Tümünü Sil',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
+
                 const SizedBox(height: 14),
                 if (maddeler.isNotEmpty)
                   TextField(
