@@ -40,8 +40,6 @@ class DonemBilgilerSekmesi extends StatefulWidget {
 }
 
 class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
-  int _seciliYil = 1;
-
   DocumentReference<Map<String, dynamic>> _donemRef() => FirebaseFirestore
       .instance
       .collection('isyerleri')
@@ -65,6 +63,64 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     final b = int.tryParse((veri['baslangicYili'] ?? '').toString());
     if (b != null) return '$i. Yıl (${b + i - 1})';
     return '$i. Yıl';
+  }
+
+  // ---------- DÖNEM SÜTUNLARI ----------
+  /// Sütunlar. Belgede 'donemler' yoksa yıllardan üretilir ve kimlikler eski
+  /// yıl numaralarıyla ('1', '2', ...) aynı olur; böylece mevcut sözleşmeler
+  /// hiçbir dönüştürme gerekmeden aynen açılır.
+  List<Map<String, String>> _donemler(Map<String, dynamic> veri) {
+    final raw = veri['donemler'];
+    if (raw is List && raw.isNotEmpty) {
+      final liste = raw
+          .map<Map<String, String>>((e) {
+            final m = Map<String, dynamic>.from(e as Map);
+            return {
+              'id': (m['id'] ?? '').toString(),
+              'ad': (m['ad'] ?? '').toString(),
+            };
+          })
+          .where((d) => d['id']!.isNotEmpty)
+          .toList();
+      if (liste.isNotEmpty) return liste;
+    }
+    final n = _yilSayisi(veri);
+    return [
+      for (var i = 1; i <= n; i++) {'id': '$i', 'ad': _yilEtiketi(veri, i)},
+    ];
+  }
+
+  Future<void> _donemleriKaydet(List<Map<String, String>> donemler) =>
+      _donemRef().update({'donemler': donemler});
+
+  /// Dönem listesi ile kategorileri **tek işlemde** yazar.
+  /// Dönem ekleme/silme sırasında taban değerler taşındığı için bu iki
+  /// yazmanın ayrılması veri kaybına yol açabilir; bu yüzden birlikte gider.
+  Future<void> _donemVeKategoriKaydet(
+    List<Map<String, String>> donemler,
+    List<Map<String, dynamic>> kategoriler,
+  ) => _donemRef().update({
+    'donemler': donemler,
+    'kategoriler': kategoriler,
+  });
+
+  /// Yeni dönem için benzersiz kimlik.
+  String _yeniDonemId() => 'd${DateTime.now().microsecondsSinceEpoch}';
+
+  /// Bir kalemin ilk dönemdeki (taban) değeri.
+  /// Eski sözleşmelerde taban 'yil1' alanındadır.
+  String _tabanDeger(
+    Map<String, dynamic> kalem,
+    List<Map<String, String>> donemler,
+  ) {
+    if (donemler.isNotEmpty) {
+      final ov = (kalem['overrides'] is Map)
+          ? Map<String, dynamic>.from(kalem['overrides'])
+          : {};
+      final v = (ov[donemler.first['id']] ?? '').toString();
+      if (v.isNotEmpty) return v;
+    }
+    return (kalem['yil1'] ?? '').toString();
   }
 
   List<Map<String, dynamic>> _kategoriler(Map<String, dynamic> veri) {
@@ -103,6 +159,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
             'yil1': x['yil1'] ?? '',
             'not': x['not'] ?? '',
             'renk': x['renk'] ?? '',
+            'tur': x['tur'] ?? 'kalem',
             'overrides': Map<String, dynamic>.from(ov),
           };
         }).toList(),
@@ -155,27 +212,38 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     return '${_binlik(parts[0])},$dec';
   }
 
+  /// Bir kalemin belirtilen dönemdeki değerini hesaplar.
+  ///
+  /// İlk dönem tabandır. Sonraki her dönem **bir önceki dönemin** üzerine
+  /// zamlanır (bileşik). Elle girilmiş bir değer varsa zincir orada kesilir.
+  /// Dönemler eskiden yıl numarasıydı; kimlikler aynı kaldığı için eski
+  /// sözleşmelerde sonuç birebir aynıdır.
   Map<String, dynamic> _hesapla(
     Map<String, dynamic> kalem,
     Map<String, dynamic> kategori,
-    int yil,
+    List<Map<String, String>> donemler,
+    int index,
   ) {
-    final yil1 = (kalem['yil1'] ?? '').toString();
-    if (yil <= 1) return {'metin': yil1, 'tur': 'baz'};
+    if (index <= 0 || donemler.isEmpty) {
+      return {'metin': _tabanDeger(kalem, donemler), 'tur': 'baz'};
+    }
+
+    final id = donemler[index]['id']!;
 
     final ov = (kalem['overrides'] is Map)
         ? Map<String, dynamic>.from(kalem['overrides'])
         : {};
-    final elle = (ov['$yil'] ?? '').toString().trim();
+    final elle = (ov[id] ?? '').toString().trim();
     if (elle.isNotEmpty) return {'metin': elle, 'tur': 'elle'};
 
     final zamlar = (kategori['zamlar'] is Map)
         ? Map<String, dynamic>.from(kategori['zamlar'])
         : {};
-    final kural = (zamlar['$yil'] ?? '').toString().trim();
+    final kural = (zamlar[id] ?? '').toString().trim();
 
-    final onceki = _hesapla(kalem, kategori, yil - 1);
-    final oncekiSayi = _sayi(onceki['metin']?.toString());
+    final onceki = _hesapla(kalem, kategori, donemler, index - 1);
+    final oncekiMetin = (onceki['metin'] ?? '').toString();
+    final oncekiSayi = _sayi(oncekiMetin);
     final oran = _sayi(kural);
 
     if (oncekiSayi != null && oran != null) {
@@ -184,10 +252,10 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         'metin': _bicim(sonuc),
         'tur': 'hesap',
         'kural': kural,
-        'baz': yil1,
+        'baz': oncekiMetin,
       };
     }
-    return {'metin': '', 'tur': 'yok', 'kural': kural, 'baz': yil1};
+    return {'metin': '', 'tur': 'yok', 'kural': kural, 'baz': oncekiMetin};
   }
 
   // ---------- EXCEL (.xlsx) ----------
@@ -200,15 +268,15 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
       ).showSnackBar(const SnackBar(content: Text('Aktarılacak veri yok')));
       return;
     }
-    final yilSayisi = _yilSayisi(veri);
-    final sutunSayisi = 1 + yilSayisi;
+    final donemler = _donemler(veri);
+    final sutunSayisi = 1 + donemler.length;
 
     final satirlar = <List<XlsxHucre?>>[
       [
         const XlsxHucre(deger: 'Kalem', kalin: true, arkaPlan: 'E8EAF6'),
-        for (var y = 1; y <= yilSayisi; y++)
+        for (final d in donemler)
           XlsxHucre(
-            deger: _yilEtiketi(veri, y),
+            deger: d['ad']!,
             kalin: true,
             hizalama: 'orta',
             arkaPlan: 'E8EAF6',
@@ -236,14 +304,16 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
       ]);
 
       // Zam oranı satırı
-      if (!direkt && yilSayisi > 1) {
+      if (!direkt && donemler.length > 1) {
         satirlar.add([
-          const XlsxHucre(deger: 'Yıllık Zam Oranı', italik: true),
-          for (var y = 1; y <= yilSayisi; y++)
+          const XlsxHucre(deger: 'Zam Oranı', italik: true),
+          for (var i = 0; i < donemler.length; i++)
             XlsxHucre(
-              deger: y == 1
+              deger: i == 0
                   ? '-'
-                  : _zamMetni((zamlar['$y'] ?? '').toString().trim()),
+                  : _zamMetni(
+                      (zamlar[donemler[i]['id']] ?? '').toString().trim(),
+                    ),
               hizalama: 'orta',
               italik: true,
             ),
@@ -252,11 +322,24 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
 
       for (final kalem in _kalemler(kategori)) {
         final kalemRenk = renkHex((kalem['renk'] ?? '').toString());
+        // Serbest satır: tüm genişliği kaplayan açıklama satırı
+        if ((kalem['tur'] ?? 'kalem').toString() == 'serbest') {
+          satirlar.add([
+            XlsxHucre(
+              deger: (kalem['ad'] ?? '').toString(),
+              italik: true,
+              arkaPlan: kalemRenk,
+              sutunKapla: sutunSayisi,
+            ),
+            for (var i = 1; i < sutunSayisi; i++) null,
+          ]);
+          continue;
+        }
         satirlar.add([
           XlsxHucre(deger: (kalem['ad'] ?? '').toString(), arkaPlan: kalemRenk),
-          for (var y = 1; y <= yilSayisi; y++)
+          for (var i = 0; i < donemler.length; i++)
             XlsxHucre(
-              deger: _degerMetni(kalem, kategori, y, direkt),
+              deger: _degerMetni(kalem, kategori, donemler, i, direkt),
               hizalama: 'sag',
               kalin: true,
               arkaPlan: kalemRenk,
@@ -302,17 +385,19 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
   String _degerMetni(
     Map<String, dynamic> kalem,
     Map<String, dynamic> kategori,
-    int yil,
+    List<Map<String, String>> donemler,
+    int index,
     bool direkt,
   ) {
-    if (yil <= 1) return (kalem['yil1'] ?? '').toString();
+    if (index <= 0) return _tabanDeger(kalem, donemler);
     if (direkt) {
       final ov = (kalem['overrides'] is Map)
           ? Map<String, dynamic>.from(kalem['overrides'])
           : {};
-      return (ov['$yil'] ?? '').toString();
+      return (ov[donemler[index]['id']] ?? '').toString();
     }
-    return (_hesapla(kalem, kategori, yil)['metin'] ?? '').toString();
+    return (_hesapla(kalem, kategori, donemler, index)['metin'] ?? '')
+        .toString();
   }
 
 
@@ -368,34 +453,39 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
   }
 
   Future<Map<String, String>?> _kalemDialog({
-    required int yil,
+    required List<Map<String, String>> donemler,
+    required int donemIndex,
     Map<String, dynamic>? mevcut,
     String otomatik = '',
     bool direkt = false,
   }) {
     final adC = TextEditingController(text: mevcut?['ad']?.toString() ?? '');
     final notC = TextEditingController(text: mevcut?['not']?.toString() ?? '');
+    final donemAd = (donemIndex >= 0 && donemIndex < donemler.length)
+        ? donemler[donemIndex]['ad']!
+        : '';
+
     String basDeger;
-    if (yil <= 1) {
-      basDeger = mevcut?['yil1']?.toString() ?? '';
+    if (donemIndex <= 0) {
+      basDeger = mevcut == null ? '' : _tabanDeger(mevcut, donemler);
     } else {
       final ov = (mevcut?['overrides'] is Map)
           ? Map<String, dynamic>.from(mevcut!['overrides'])
           : {};
-      basDeger = (ov['$yil'] ?? '').toString();
+      basDeger = (ov[donemler[donemIndex]['id']] ?? '').toString();
     }
     final degerC = TextEditingController(text: basDeger);
 
     String etiket;
     String ipucu;
-    if (yil <= 1) {
-      etiket = '1. Yıl değeri';
+    if (donemIndex <= 0) {
+      etiket = '$donemAd değeri (taban)';
       ipucu = 'Örn. 8.500 TL veya %30';
     } else if (direkt) {
-      etiket = '$yil. Yıl değeri';
+      etiket = '$donemAd değeri';
       ipucu = 'Örn. %35';
     } else {
-      etiket = '$yil. Yıl değeri (boş = otomatik)';
+      etiket = '$donemAd değeri (boş = otomatik)';
       ipucu = otomatik.isNotEmpty
           ? 'Otomatik: $otomatik'
           : 'Elle bir değer yaz';
@@ -459,7 +549,16 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     String ad,
   ) async {
     final kalemler = (presetKategoriler[ad] ?? [])
-        .map((k) => {'ad': k, 'yil1': '', 'not': '', 'overrides': {}})
+        .map(
+          (k) => {
+            'ad': k,
+            'yil1': '',
+            'not': '',
+            'renk': '',
+            'tur': 'kalem',
+            'overrides': {},
+          },
+        )
         .toList();
     final yeni = _kopya(mevcut)
       ..add({
@@ -512,14 +611,25 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
 
   Future<void> _kalemEkle(List<Map<String, dynamic>> mevcut, int kat) async {
     final direkt = _direkt(mevcut[kat]);
-    final sonuc = await _kalemDialog(yil: 1, direkt: direkt);
+    final donemler = _sonDonemler;
+    final sonuc = await _kalemDialog(
+      donemler: donemler,
+      donemIndex: 0,
+      direkt: direkt,
+    );
     if (sonuc == null || sonuc['ad']!.isEmpty) return;
     final yeni = _kopya(mevcut);
+    final overrides = <String, dynamic>{};
+    if (donemler.isNotEmpty && sonuc['deger']!.isNotEmpty) {
+      overrides[donemler.first['id']!] = sonuc['deger'];
+    }
     (yeni[kat]['kalemler'] as List).add({
       'ad': sonuc['ad'],
       'yil1': sonuc['deger'],
       'not': sonuc['not'],
-      'overrides': {},
+      'renk': '',
+      'tur': 'kalem',
+      'overrides': overrides,
     });
     await _kaydet(yeni);
   }
@@ -528,13 +638,15 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     List<Map<String, dynamic>> mevcut,
     int kat,
     int idx,
-    int yil,
+    List<Map<String, String>> donemler,
+    int donemIndex,
     String otomatik,
     bool direkt,
   ) async {
     final kalemler = _kalemler(mevcut[kat]);
     final sonuc = await _kalemDialog(
-      yil: yil,
+      donemler: donemler,
+      donemIndex: donemIndex,
       mevcut: kalemler[idx],
       otomatik: otomatik,
       direkt: direkt,
@@ -544,10 +656,20 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     final k = (yeni[kat]['kalemler'] as List)[idx] as Map;
     k['ad'] = sonuc['ad'];
     k['not'] = sonuc['not'];
-    if (yil <= 1) {
-      k['yil1'] = sonuc['deger'];
+
+    final deger = sonuc['deger'] ?? '';
+    if (donemler.isEmpty) {
+      k['yil1'] = deger;
     } else {
-      (k['overrides'] as Map)['$yil'] = sonuc['deger'];
+      final id = donemler[donemIndex.clamp(0, donemler.length - 1)]['id']!;
+      final ov = k['overrides'] as Map;
+      if (deger.isEmpty) {
+        ov.remove(id);
+      } else {
+        ov[id] = deger;
+      }
+      // İlk dönem taban olduğu için eski alanla da eşitlenir
+      if (donemIndex <= 0) k['yil1'] = deger;
     }
     await _kaydet(yeni);
   }
@@ -579,14 +701,16 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
   }
 
   // ---------- DÜZENLEME DURUMU ----------
-  // Hücreye tıklayıp yazma: anahtar 'tur:kategori:kalem:yil' biçiminde.
+  // Hücreye tıklayıp yazma: anahtar 'tur:kategori:kalem:donemId' biçiminde.
   String? _duzAnahtar;
   final TextEditingController _duzC = TextEditingController();
   final FocusNode _duzOdak = FocusNode();
-  bool _tumYillar = true;
+  bool _tumDonemler = true;
+  int _seciliDonem = 0;
 
-  /// Akıştan gelen en son kategori listesi (düzenleme kaydederken kullanılır).
+  /// Akıştan gelen en son veriler (düzenleme kaydederken kullanılır).
   List<Map<String, dynamic>> _sonKategoriler = [];
+  List<Map<String, String>> _sonDonemler = [];
 
   @override
   void initState() {
@@ -626,7 +750,20 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     final tur = p[0];
     final kat = int.tryParse(p[1]) ?? -1;
     final idx = int.tryParse(p[2]) ?? -1;
-    final yil = int.tryParse(p[3]) ?? 0;
+    final donemId = p[3];
+
+    // Dönem başlığı kategori listesinden bağımsız
+    if (tur == 'donemAd') {
+      if (metin.isEmpty) return;
+      final liste = _sonDonemler
+          .map((d) => {'id': d['id']!, 'ad': d['ad']!})
+          .toList();
+      final yeri = liste.indexWhere((d) => d['id'] == donemId);
+      if (yeri < 0) return;
+      liste[yeri]['ad'] = metin;
+      await _donemleriKaydet(liste);
+      return;
+    }
 
     final mevcut = _sonKategoriler;
     if (kat < 0 || kat >= mevcut.length) return;
@@ -641,24 +778,226 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         if (idx < 0 || idx >= kalemler.length || metin.isEmpty) return;
         (kalemler[idx] as Map)['ad'] = metin;
       case 'zam':
-        (yeni[kat]['zamlar'] as Map)['$yil'] = metin;
+        (yeni[kat]['zamlar'] as Map)[donemId] = metin;
       case 'deger':
         if (idx < 0 || idx >= kalemler.length) return;
         final k = kalemler[idx] as Map;
-        if (yil <= 1) {
+        final ov = k['overrides'] as Map;
+        final ilkDonem =
+            _sonDonemler.isNotEmpty && _sonDonemler.first['id'] == donemId;
+        if (ilkDonem) {
+          // Taban değer: hem yeni hem eski alana yazılır
           k['yil1'] = metin;
+          if (metin.isEmpty) {
+            ov.remove(donemId);
+          } else {
+            ov[donemId] = metin;
+          }
         } else {
-          final ov = k['overrides'] as Map;
           // Boş bırakmak = otomatik hesaba dön
           if (metin.isEmpty) {
-            ov.remove('$yil');
+            ov.remove(donemId);
           } else {
-            ov['$yil'] = metin;
+            ov[donemId] = metin;
           }
         }
       default:
         return;
     }
+    await _kaydet(yeni);
+  }
+
+  // ---------- DÖNEM YÖNETİMİ ----------
+  /// Belirtilen konuma yeni dönem ekler.
+  /// Başa eklenirken taban değerler eski ilk döneme taşınır ki
+  /// hesap zinciri bozulmasın.
+  Future<void> _donemEkle(
+    Map<String, dynamic> veri,
+    List<Map<String, String>> donemler,
+    int konum,
+  ) async {
+    final ad = await _metinDialog(
+      'Yeni Dönem',
+      'Dönem adı',
+      ipucu: 'Örn. 01.06.2026 - 31.12.2026',
+    );
+    if (ad == null || ad.isEmpty) return;
+
+    final liste = donemler.map((d) => {'id': d['id']!, 'ad': d['ad']!}).toList();
+    final yeniId = _yeniDonemId();
+    final yer = konum.clamp(0, liste.length);
+
+    if (yer == 0 && liste.isNotEmpty) {
+      // Yeni dönem taban oluyor; eski taban değerler eski ilk döneme taşınır
+      // ki hesap zinciri bozulmasın.
+      final eskiIlkId = liste.first['id']!;
+      final kategoriler = _kopya(_sonKategoriler);
+      for (final kategori in kategoriler) {
+        for (final kalem in (kategori['kalemler'] as List)) {
+          final k = kalem as Map;
+          final taban = _tabanDeger(
+            Map<String, dynamic>.from(k),
+            donemler,
+          );
+          if (taban.isNotEmpty) {
+            (k['overrides'] as Map)[eskiIlkId] = taban;
+          }
+          k['yil1'] = '';
+        }
+      }
+      liste.insert(yer, {'id': yeniId, 'ad': ad});
+      await _donemVeKategoriKaydet(liste, kategoriler);
+      return;
+    }
+
+    liste.insert(yer, {'id': yeniId, 'ad': ad});
+    await _donemleriKaydet(liste);
+  }
+
+  Future<void> _donemSil(
+    List<Map<String, String>> donemler,
+    int index,
+  ) async {
+    if (donemler.length <= 1) {
+      _uyari('Son dönem silinemez');
+      return;
+    }
+    final onay = await _onayDialog(
+      'Dönemi sil',
+      '"${donemler[index]['ad']}" sütunu ve içindeki değerler silinsin mi?',
+    );
+    if (onay != true) return;
+
+    final silinenId = donemler[index]['id']!;
+    final ilkMi = index == 0;
+
+    // Bu döneme ait elle girilmiş değerler ve zam kuralları temizlenir.
+    final kategoriler = _kopya(_sonKategoriler);
+    for (final kategori in kategoriler) {
+      (kategori['zamlar'] as Map).remove(silinenId);
+      for (final kalem in (kategori['kalemler'] as List)) {
+        final k = kalem as Map;
+        (k['overrides'] as Map).remove(silinenId);
+        if (ilkMi) k['yil1'] = '';
+      }
+    }
+
+    final liste = donemler.map((d) => {'id': d['id']!, 'ad': d['ad']!}).toList()
+      ..removeAt(index);
+
+    // Yeni ilk dönem taban olur: değerini yil1'e de yaz.
+    if (ilkMi && liste.isNotEmpty) {
+      final yeniIlkId = liste.first['id']!;
+      for (final kategori in kategoriler) {
+        for (final kalem in (kategori['kalemler'] as List)) {
+          final k = kalem as Map;
+          final v = ((k['overrides'] as Map)[yeniIlkId] ?? '').toString();
+          k['yil1'] = v;
+        }
+      }
+    }
+
+    await _donemVeKategoriKaydet(liste, kategoriler);
+  }
+
+  Future<void> _donemTasi(
+    List<Map<String, String>> donemler,
+    int index,
+    int yon,
+  ) async {
+    final hedef = index + yon;
+    if (hedef < 0 || hedef >= donemler.length) return;
+    final liste = donemler.map((d) => {'id': d['id']!, 'ad': d['ad']!}).toList();
+    final t = liste[index];
+    liste[index] = liste[hedef];
+    liste[hedef] = t;
+    await _donemleriKaydet(liste);
+  }
+
+  void _donemMenu(
+    Offset konum,
+    Map<String, dynamic> veri,
+    List<Map<String, String>> donemler,
+    int index,
+  ) {
+    _menuGoster(
+      konum,
+      [
+        const PopupMenuItem(value: 'sol', child: Text('Soluna dönem ekle')),
+        const PopupMenuItem(value: 'sag', child: Text('Sağına dönem ekle')),
+        const PopupMenuDivider(),
+        if (index > 0)
+          const PopupMenuItem(value: 'geri', child: Text('Sola taşı')),
+        if (index < donemler.length - 1)
+          const PopupMenuItem(value: 'ileri', child: Text('Sağa taşı')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'sil', child: Text('Dönemi sil')),
+      ],
+      (x) async {
+        if (x == 'sol') await _donemEkle(veri, donemler, index);
+        if (x == 'sag') await _donemEkle(veri, donemler, index + 1);
+        if (x == 'geri') await _donemTasi(donemler, index, -1);
+        if (x == 'ileri') await _donemTasi(donemler, index, 1);
+        if (x == 'sil') await _donemSil(donemler, index);
+      },
+    );
+  }
+
+  void _uyari(String metin) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(metin)));
+  }
+
+  // ---------- SATIR SIRASI VE SERBEST SATIR ----------
+  Future<void> _kalemTasi(
+    List<Map<String, dynamic>> mevcut,
+    int kat,
+    int idx,
+    int yon,
+  ) async {
+    final yeni = _kopya(mevcut);
+    final kalemler = yeni[kat]['kalemler'] as List;
+    final hedef = idx + yon;
+    if (hedef < 0 || hedef >= kalemler.length) return;
+    final t = kalemler[idx];
+    kalemler[idx] = kalemler[hedef];
+    kalemler[hedef] = t;
+    await _kaydet(yeni);
+  }
+
+  Future<void> _kategoriTasi(
+    List<Map<String, dynamic>> mevcut,
+    int kat,
+    int yon,
+  ) async {
+    final hedef = kat + yon;
+    if (hedef < 0 || hedef >= mevcut.length) return;
+    final yeni = _kopya(mevcut);
+    final t = yeni[kat];
+    yeni[kat] = yeni[hedef];
+    yeni[hedef] = t;
+    await _kaydet(yeni);
+  }
+
+  Future<void> _serbestSatirEkle(
+    List<Map<String, dynamic>> mevcut,
+    int kat,
+  ) async {
+    final metin = await _metinDialog(
+      'Serbest Satır',
+      'Satır metni',
+      ipucu: 'Örn. * İşçi vefatında 24 aylık maaşı ödenir',
+    );
+    if (metin == null || metin.isEmpty) return;
+    final yeni = _kopya(mevcut);
+    (yeni[kat]['kalemler'] as List).add({
+      'ad': metin,
+      'yil1': '',
+      'not': '',
+      'renk': '',
+      'tur': 'serbest',
+      'overrides': {},
+    });
     await _kaydet(yeni);
   }
 
@@ -733,16 +1072,26 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
   ) {
     _menuGoster(
       konum,
-      const [
-        PopupMenuItem(value: 'renk', child: Text('Arka plan rengi…')),
-        PopupMenuItem(value: 'kalem', child: Text('Kalem ekle')),
-        PopupMenuItem(value: 'not', child: Text('Not düzenle')),
-        PopupMenuItem(value: 'sil', child: Text('Kategoriyi sil')),
+      [
+        const PopupMenuItem(value: 'renk', child: Text('Arka plan rengi…')),
+        const PopupMenuItem(value: 'kalem', child: Text('Kalem ekle')),
+        const PopupMenuItem(value: 'serbest', child: Text('Serbest satır ekle')),
+        const PopupMenuItem(value: 'not', child: Text('Not düzenle')),
+        const PopupMenuDivider(),
+        if (kat > 0)
+          const PopupMenuItem(value: 'yukari', child: Text('Yukarı taşı')),
+        if (kat < kategoriler.length - 1)
+          const PopupMenuItem(value: 'asagi', child: Text('Aşağı taşı')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'sil', child: Text('Kategoriyi sil')),
       ],
       (x) async {
         if (x == 'renk') await _renkAta(kategoriler, kat);
         if (x == 'kalem') await _kalemEkle(kategoriler, kat);
+        if (x == 'serbest') await _serbestSatirEkle(kategoriler, kat);
         if (x == 'not') await _kategoriNot(kategoriler, kat);
+        if (x == 'yukari') await _kategoriTasi(kategoriler, kat, -1);
+        if (x == 'asagi') await _kategoriTasi(kategoriler, kat, 1);
         if (x == 'sil') await _kategoriSil(kategoriler, kat);
       },
     );
@@ -751,34 +1100,63 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
   void _kalemMenu(
     Offset konum,
     List<Map<String, dynamic>> kategoriler,
+    List<Map<String, String>> donemler,
     int kat,
     int idx,
-    int yil,
+    int donemIndex,
     bool direkt,
   ) {
-    final kalem = _kalemler(kategoriler[kat])[idx];
+    final kalemler = _kalemler(kategoriler[kat]);
+    final kalem = kalemler[idx];
     final not = (kalem['not'] ?? '').toString();
+    final serbest = (kalem['tur'] ?? 'kalem').toString() == 'serbest';
     _menuGoster(
       konum,
       [
         const PopupMenuItem(value: 'renk', child: Text('Arka plan rengi…')),
-        const PopupMenuItem(value: 'duzenle', child: Text('Düzenle…')),
+        if (!serbest)
+          const PopupMenuItem(value: 'duzenle', child: Text('Düzenle…')),
         if (not.isNotEmpty)
           const PopupMenuItem(value: 'notGoster', child: Text('Notu göster')),
-        const PopupMenuItem(value: 'sil', child: Text('Kalemi sil')),
+        const PopupMenuDivider(),
+        if (idx > 0)
+          const PopupMenuItem(value: 'yukari', child: Text('Yukarı taşı')),
+        if (idx < kalemler.length - 1)
+          const PopupMenuItem(value: 'asagi', child: Text('Aşağı taşı')),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'sil',
+          child: Text(serbest ? 'Satırı sil' : 'Kalemi sil'),
+        ),
       ],
       (x) async {
         if (x == 'renk') await _renkAta(kategoriler, kat, kalem: idx);
         if (x == 'duzenle') {
-          final otomatik = (yil > 1 && !direkt)
-              ? (_hesapla(kalem, kategoriler[kat], yil)['metin'] ?? '')
+          final otomatik = (donemIndex > 0 && !direkt)
+              ? (_hesapla(
+                      kalem,
+                      kategoriler[kat],
+                      donemler,
+                      donemIndex,
+                    )['metin'] ??
+                    '')
                     .toString()
               : '';
-          await _kalemDuzenle(kategoriler, kat, idx, yil, otomatik, direkt);
+          await _kalemDuzenle(
+            kategoriler,
+            kat,
+            idx,
+            donemler,
+            donemIndex,
+            otomatik,
+            direkt,
+          );
         }
         if (x == 'notGoster') {
           await _kalemNotGoster((kalem['ad'] ?? '').toString(), not);
         }
+        if (x == 'yukari') await _kalemTasi(kategoriler, kat, idx, -1);
+        if (x == 'asagi') await _kalemTasi(kategoriler, kat, idx, 1);
         if (x == 'sil') await _kalemSil(kategoriler, kat, idx);
       },
     );
@@ -831,21 +1209,28 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     );
   }
 
-  /// Bir kalemin bir yıla ait değer hücresi.
+  /// Bir kalemin bir döneme ait değer hücresi.
   IzgaraHucre _degerHucresi(
     List<Map<String, dynamic>> kategoriler,
+    List<Map<String, String>> donemler,
     int kat,
     int idx,
-    int yil,
+    int donemIndex,
     bool direkt,
     Color? zemin,
   ) {
     final kategori = kategoriler[kat];
     final kalem = _kalemler(kategori)[idx];
-    final anahtar = 'deger:$kat:$idx:$yil';
+    final donemId = donemler[donemIndex]['id']!;
+    final anahtar = 'deger:$kat:$idx:$donemId';
 
-    if (yil <= 1) {
-      final v = (kalem['yil1'] ?? '').toString();
+    final ov = (kalem['overrides'] is Map)
+        ? Map<String, dynamic>.from(kalem['overrides'])
+        : {};
+
+    // İlk dönem = taban değer
+    if (donemIndex <= 0) {
+      final v = _tabanDeger(kalem, donemler);
       return _duzenlenebilir(
         anahtar: anahtar,
         gosterilen: v.isEmpty ? '—' : v,
@@ -854,15 +1239,13 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         yazi: v.isEmpty ? Colors.grey.shade400 : AppRenk.amber,
         hiza: TextAlign.right,
         zemin: zemin,
-        ipucuMetin: '1. yıl değeri — taban',
-        onMenu: (k) => _kalemMenu(k, kategoriler, kat, idx, yil, direkt),
+        ipucuMetin: 'Taban değer — zam zinciri buradan başlar',
+        onMenu: (k) =>
+            _kalemMenu(k, kategoriler, donemler, kat, idx, donemIndex, direkt),
       );
     }
 
-    final ov = (kalem['overrides'] is Map)
-        ? Map<String, dynamic>.from(kalem['overrides'])
-        : {};
-    final elleDeger = (ov['$yil'] ?? '').toString();
+    final elleDeger = (ov[donemId] ?? '').toString();
 
     if (direkt) {
       return _duzenlenebilir(
@@ -873,12 +1256,13 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         yazi: elleDeger.isEmpty ? Colors.grey.shade400 : AppRenk.amber,
         hiza: TextAlign.right,
         zemin: zemin,
-        ipucuMetin: '$yil. yıl değeri',
-        onMenu: (k) => _kalemMenu(k, kategoriler, kat, idx, yil, direkt),
+        ipucuMetin: '${donemler[donemIndex]['ad']} değeri',
+        onMenu: (k) =>
+            _kalemMenu(k, kategoriler, donemler, kat, idx, donemIndex, direkt),
       );
     }
 
-    final hesap = _hesapla(kalem, kategori, yil);
+    final hesap = _hesapla(kalem, kategori, donemler, donemIndex);
     final tur = (hesap['tur'] ?? '').toString();
     final metin = (hesap['metin'] ?? '').toString();
 
@@ -889,14 +1273,14 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
       renk = AppRenk.indigo;
     } else if (tur == 'hesap') {
       ipucu =
-          'Otomatik: bir önceki yıl × (1 + %${hesap['kural']})'
+          'Otomatik: ${hesap['baz']} × (1 + %${hesap['kural']})'
           '\nÜzerine yazarsan elle değere döner';
       renk = AppRenk.amber;
     } else {
       final kural = (hesap['kural'] ?? '').toString();
       ipucu = kural.isEmpty
           ? 'Zam oranı girilmemiş'
-          : 'Taban değer sayı değil, hesaplanamıyor';
+          : 'Önceki dönem değeri sayı değil, hesaplanamıyor';
       renk = Colors.grey.shade400;
     }
 
@@ -910,7 +1294,8 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
       hiza: TextAlign.right,
       zemin: zemin,
       ipucuMetin: ipucu,
-      onMenu: (k) => _kalemMenu(k, kategoriler, kat, idx, yil, direkt),
+      onMenu: (k) =>
+          _kalemMenu(k, kategoriler, donemler, kat, idx, donemIndex, direkt),
     );
   }
 
@@ -931,14 +1316,61 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         zemin: zemin,
         yazi: yaziRengi(zemin),
         sutunKapla: sutunSayisi,
-        ipucuMetin: 'Tıkla: adı değiştir • Sağ tık: renk, kalem, not, sil',
+        ipucuMetin: 'Tıkla: adı değiştir • Sağ tık: renk, satır ekle, taşı, sil',
         onMenu: (k) => _kategoriMenu(k, kategoriler, kat),
       ),
       for (var i = 1; i < sutunSayisi; i++) null,
     ];
   }
 
+  /// Kaleme bağlı olmayan serbest açıklama satırı.
+  List<IzgaraHucre?> _serbestSatir(
+    List<Map<String, dynamic>> kategoriler,
+    List<Map<String, String>> donemler,
+    int kat,
+    int idx,
+    int sutunSayisi,
+    bool direkt,
+  ) {
+    final kalem = _kalemler(kategoriler[kat])[idx];
+    final zemin = renkCoz((kalem['renk'] ?? '').toString());
+    return [
+      _duzenlenebilir(
+        anahtar: 'kalemAd:$kat:$idx:0',
+        gosterilen: (kalem['ad'] ?? '').toString(),
+        duzenlenecek: (kalem['ad'] ?? '').toString(),
+        italik: true,
+        yazi: Colors.black87,
+        zemin: zemin,
+        sutunKapla: sutunSayisi,
+        ipucuMetin: 'Serbest satır — istediğini yazabilirsin',
+        onMenu: (k) => _kalemMenu(k, kategoriler, donemler, kat, idx, 0, direkt),
+      ),
+      for (var i = 1; i < sutunSayisi; i++) null,
+    ];
+  }
+
   static final Color _katVarsayilan = AppRenk.indigo.withOpacity(0.14);
+  static const Color _baslikZemin = Color(0xFFE8EAF6);
+
+  /// Dönem başlığı hücresi — tıkla adını değiştir, sağ tık menü.
+  IzgaraHucre _donemBasligi(
+    Map<String, dynamic> veri,
+    List<Map<String, String>> donemler,
+    int index,
+  ) {
+    final d = donemler[index];
+    return _duzenlenebilir(
+      anahtar: 'donemAd:-1:-1:${d['id']}',
+      gosterilen: d['ad']!,
+      duzenlenecek: d['ad']!,
+      kalin: true,
+      hiza: TextAlign.center,
+      zemin: _baslikZemin,
+      ipucuMetin: 'Tıkla: adı değiştir • Sağ tık: dönem ekle, taşı, sil',
+      onMenu: (k) => _donemMenu(k, veri, donemler, index),
+    );
+  }
 
   // ---------- EKRAN ----------
   @override
@@ -951,11 +1383,12 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         }
         final veri = snapshot.data!.data() ?? {};
         final kategoriler = _kategoriler(veri);
+        final donemler = _donemler(veri);
         _sonKategoriler = kategoriler;
-        final yilSayisi = _yilSayisi(veri);
-        final seciliYil = _seciliYil.clamp(1, yilSayisi);
+        _sonDonemler = donemler;
+        final seciliDonem = _seciliDonem.clamp(0, donemler.length - 1);
         final eklenenAdlar = kategoriler.map((k) => k['ad'] as String).toSet();
-        final tumYillar = _tumYillar || yilSayisi <= 1;
+        final tumDonemler = _tumDonemler || donemler.length <= 1;
 
         return ListView(
           padding: const EdgeInsets.all(16),
@@ -968,6 +1401,13 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                   ),
                 ),
+                OutlinedButton.icon(
+                  onPressed: () =>
+                      _donemEkle(veri, donemler, donemler.length),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Dönem ekle'),
+                ),
+                const SizedBox(width: 8),
                 if (kategoriler.isNotEmpty)
                   OutlinedButton.icon(
                     onPressed: () => _exceleAktar(veri),
@@ -977,7 +1417,7 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
               ],
             ),
             const SizedBox(height: 12),
-            if (yilSayisi > 1)
+            if (donemler.length > 1)
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -988,15 +1428,15 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
                       ButtonSegment(
                         value: true,
                         icon: Icon(Icons.table_chart_outlined, size: 16),
-                        label: Text('Tüm yıllar'),
+                        label: Text('Tüm dönemler'),
                       ),
                       ButtonSegment(
                         value: false,
                         icon: Icon(Icons.view_week_outlined, size: 16),
-                        label: Text('Tek yıl (detaylı)'),
+                        label: Text('Tek dönem (detaylı)'),
                       ),
                     ],
-                    selected: {tumYillar},
+                    selected: {tumDonemler},
                     showSelectedIcon: false,
                     style: ButtonStyle(
                       visualDensity: VisualDensity.compact,
@@ -1005,22 +1445,21 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
                       ),
                     ),
                     onSelectionChanged: (s) =>
-                        setState(() => _tumYillar = s.first),
+                        setState(() => _tumDonemler = s.first),
                   ),
-                  if (!tumYillar)
-                    ...List.generate(yilSayisi, (i) {
-                      final yil = i + 1;
+                  if (!tumDonemler)
+                    ...List.generate(donemler.length, (i) {
                       return ChoiceChip(
-                        label: Text(_yilEtiketi(veri, yil)),
-                        selected: seciliYil == yil,
+                        label: Text(donemler[i]['ad']!),
+                        selected: seciliDonem == i,
                         selectedColor: AppRenk.indigo,
                         labelStyle: TextStyle(
-                          color: seciliYil == yil
+                          color: seciliDonem == i
                               ? Colors.white
                               : Colors.black87,
                           fontWeight: FontWeight.w600,
                         ),
-                        onSelected: (_) => setState(() => _seciliYil = yil),
+                        onSelected: (_) => setState(() => _seciliDonem = i),
                       );
                     }),
                 ],
@@ -1039,13 +1478,18 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
             else
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: tumYillar
-                    ? _tumYillarIzgara(veri, kategoriler, yilSayisi)
-                    : _tekYilIzgara(veri, kategoriler, seciliYil),
+                child: tumDonemler
+                    ? _tumDonemlerIzgara(veri, kategoriler, donemler)
+                    : _tekDonemIzgara(
+                        veri,
+                        kategoriler,
+                        donemler,
+                        seciliDonem,
+                      ),
               ),
             const SizedBox(height: 6),
             Text(
-              'Hücreye tıkla: yaz  •  Sağ tık (telefonda uzun bas): renk, kalem, not, sil  •  Sütun kenarını çek: genişlik',
+              'Hücreye tıkla: yaz  •  Sağ tık (telefonda uzun bas): renk, satır/dönem ekle, taşı, sil  •  Sütun kenarını çek: genişlik',
               style: TextStyle(fontSize: 10.5, color: Colors.grey.shade400),
             ),
             const SizedBox(height: 12),
@@ -1074,27 +1518,18 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     );
   }
 
-  /// Kalemler satır, yıllar sütun.
-  Widget _tumYillarIzgara(
+  /// Kalemler satır, dönemler sütun.
+  Widget _tumDonemlerIzgara(
     Map<String, dynamic> veri,
     List<Map<String, dynamic>> kategoriler,
-    int yilSayisi,
+    List<Map<String, String>> donemler,
   ) {
-    final sutunSayisi = 1 + yilSayisi;
+    final sutunSayisi = 1 + donemler.length;
     final satirlar = <List<IzgaraHucre?>>[
       [
-        const IzgaraHucre(
-          metin: 'Kalem',
-          kalin: true,
-          zemin: Color(0xFFE8EAF6),
-        ),
-        for (var y = 1; y <= yilSayisi; y++)
-          IzgaraHucre(
-            metin: _yilEtiketi(veri, y),
-            kalin: true,
-            hiza: TextAlign.center,
-            zemin: const Color(0xFFE8EAF6),
-          ),
+        const IzgaraHucre(metin: 'Kalem', kalin: true, zemin: _baslikZemin),
+        for (var i = 0; i < donemler.length; i++)
+          _donemBasligi(veri, donemler, i),
       ],
     ];
 
@@ -1122,31 +1557,36 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
         ]);
       }
 
-      if (!direkt && yilSayisi > 1) {
+      if (!direkt && donemler.length > 1) {
         satirlar.add([
           IzgaraHucre(
-            metin: 'Yıllık Zam Oranı',
+            metin: 'Zam Oranı',
             italik: true,
             yazi: AppRenk.emerald,
             yaziBoyutu: 12.5,
           ),
-          for (var y = 1; y <= yilSayisi; y++)
-            if (y == 1)
+          for (var i = 0; i < donemler.length; i++)
+            if (i == 0)
               IzgaraHucre(
                 metin: '—',
                 hiza: TextAlign.center,
                 yazi: Colors.grey.shade400,
+                ipucu: 'İlk dönem tabandır, zam uygulanmaz',
               )
             else
               _duzenlenebilir(
-                anahtar: 'zam:$kat:-1:$y',
-                gosterilen: _zamMetni((zamlar['$y'] ?? '').toString().trim()),
-                duzenlenecek: (zamlar['$y'] ?? '').toString(),
+                anahtar: 'zam:$kat:-1:${donemler[i]['id']}',
+                gosterilen: _zamMetni(
+                  (zamlar[donemler[i]['id']] ?? '').toString().trim(),
+                ),
+                duzenlenecek: (zamlar[donemler[i]['id']] ?? '').toString(),
                 italik: true,
                 kalin: true,
                 yazi: AppRenk.emerald,
                 hiza: TextAlign.center,
-                ipucuMetin: 'Tıkla: $y. yıl zam oranını yaz (örn. 40)',
+                ipucuMetin:
+                    'Tıkla: bu dönemin zam oranını yaz (örn. 20)\n'
+                    'Bir önceki dönemin üzerine uygulanır',
               ),
         ]);
       }
@@ -1165,6 +1605,19 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
       }
 
       for (var idx = 0; idx < kalemler.length; idx++) {
+        if ((kalemler[idx]['tur'] ?? 'kalem').toString() == 'serbest') {
+          satirlar.add(
+            _serbestSatir(
+              kategoriler,
+              donemler,
+              kat,
+              idx,
+              sutunSayisi,
+              direkt,
+            ),
+          );
+          continue;
+        }
         final zemin = renkCoz((kalemler[idx]['renk'] ?? '').toString());
         satirlar.add([
           _duzenlenebilir(
@@ -1173,10 +1626,11 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
             duzenlenecek: (kalemler[idx]['ad'] ?? '').toString(),
             zemin: zemin,
             ipucuMetin: (kalemler[idx]['not'] ?? '').toString(),
-            onMenu: (k) => _kalemMenu(k, kategoriler, kat, idx, 1, direkt),
+            onMenu: (k) =>
+                _kalemMenu(k, kategoriler, donemler, kat, idx, 0, direkt),
           ),
-          for (var y = 1; y <= yilSayisi; y++)
-            _degerHucresi(kategoriler, kat, idx, y, direkt, zemin),
+          for (var i = 0; i < donemler.length; i++)
+            _degerHucresi(kategoriler, donemler, kat, idx, i, direkt, zemin),
         ]);
       }
     }
@@ -1191,42 +1645,36 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
     );
   }
 
-  /// Tek yıl: taban ve zam oranı ayrı sütunlarda.
-  Widget _tekYilIzgara(
+  /// Tek dönem: önceki dönem ve zam oranı ayrı sütunlarda.
+  Widget _tekDonemIzgara(
     Map<String, dynamic> veri,
     List<Map<String, dynamic>> kategoriler,
-    int yil,
+    List<Map<String, String>> donemler,
+    int donemIndex,
   ) {
-    final detay = yil > 1;
+    final detay = donemIndex > 0;
     final sutunSayisi = detay ? 4 : 2;
+    final oncekiAd = detay ? donemler[donemIndex - 1]['ad']! : '';
 
     final satirlar = <List<IzgaraHucre?>>[
       [
-        const IzgaraHucre(
-          metin: 'Kalem',
-          kalin: true,
-          zemin: Color(0xFFE8EAF6),
-        ),
+        const IzgaraHucre(metin: 'Kalem', kalin: true, zemin: _baslikZemin),
         if (detay) ...[
-          const IzgaraHucre(
-            metin: 'Taban (1. Yıl)',
+          IzgaraHucre(
+            metin: 'Önceki\n$oncekiAd',
             kalin: true,
             hiza: TextAlign.center,
-            zemin: Color(0xFFE8EAF6),
+            zemin: _baslikZemin,
+            yaziBoyutu: 12,
           ),
           const IzgaraHucre(
             metin: 'Zam',
             kalin: true,
             hiza: TextAlign.center,
-            zemin: Color(0xFFE8EAF6),
+            zemin: _baslikZemin,
           ),
         ],
-        IzgaraHucre(
-          metin: _yilEtiketi(veri, yil),
-          kalin: true,
-          hiza: TextAlign.center,
-          zemin: const Color(0xFFE8EAF6),
-        ),
+        _donemBasligi(veri, donemler, donemIndex),
       ],
     ];
 
@@ -1242,8 +1690,20 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
 
       for (var idx = 0; idx < kalemler.length; idx++) {
         final kalem = kalemler[idx];
+        if ((kalem['tur'] ?? 'kalem').toString() == 'serbest') {
+          satirlar.add(
+            _serbestSatir(
+              kategoriler,
+              donemler,
+              kat,
+              idx,
+              sutunSayisi,
+              direkt,
+            ),
+          );
+          continue;
+        }
         final zemin = renkCoz((kalem['renk'] ?? '').toString());
-        final taban = (kalem['yil1'] ?? '').toString();
 
         satirlar.add([
           _duzenlenebilir(
@@ -1252,15 +1712,37 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
             duzenlenecek: (kalem['ad'] ?? '').toString(),
             zemin: zemin,
             ipucuMetin: (kalem['not'] ?? '').toString(),
-            onMenu: (k) => _kalemMenu(k, kategoriler, kat, idx, yil, direkt),
+            onMenu: (k) => _kalemMenu(
+              k,
+              kategoriler,
+              donemler,
+              kat,
+              idx,
+              donemIndex,
+              direkt,
+            ),
           ),
           if (detay) ...[
             IzgaraHucre(
-              metin: taban.isEmpty ? '—' : taban,
+              metin: _degerMetni(
+                kalem,
+                kategori,
+                donemler,
+                donemIndex - 1,
+                direkt,
+              ).isEmpty
+                  ? '—'
+                  : _degerMetni(
+                      kalem,
+                      kategori,
+                      donemler,
+                      donemIndex - 1,
+                      direkt,
+                    ),
               hiza: TextAlign.right,
               yazi: Colors.grey.shade600,
               zemin: zemin,
-              ipucu: '1. yıl değeri',
+              ipucu: 'Bir önceki dönemin değeri',
             ),
             if (direkt)
               IzgaraHucre(
@@ -1271,17 +1753,28 @@ class _DonemBilgilerSekmesiState extends State<DonemBilgilerSekmesi> {
               )
             else
               _duzenlenebilir(
-                anahtar: 'zam:$kat:-1:$yil',
-                gosterilen: _zamMetni((zamlar['$yil'] ?? '').toString().trim()),
-                duzenlenecek: (zamlar['$yil'] ?? '').toString(),
+                anahtar: 'zam:$kat:-1:${donemler[donemIndex]['id']}',
+                gosterilen: _zamMetni(
+                  (zamlar[donemler[donemIndex]['id']] ?? '').toString().trim(),
+                ),
+                duzenlenecek: (zamlar[donemler[donemIndex]['id']] ?? '')
+                    .toString(),
                 kalin: true,
                 yazi: AppRenk.emerald,
                 hiza: TextAlign.center,
                 zemin: zemin,
-                ipucuMetin: 'Tıkla: $yil. yıl zam oranını yaz',
+                ipucuMetin: 'Tıkla: bu dönemin zam oranını yaz',
               ),
           ],
-          _degerHucresi(kategoriler, kat, idx, yil, direkt, zemin),
+          _degerHucresi(
+            kategoriler,
+            donemler,
+            kat,
+            idx,
+            donemIndex,
+            direkt,
+            zemin,
+          ),
         ]);
       }
     }
