@@ -20,4 +20,24 @@ class AyarlarServisi {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_anahtarKey);
   }
+
+  // ---------- Kayıt metni yazı boyutu ----------
+  static const _yaziBoyutuKey = 'kayit_yazi_boyutu';
+  static const yaziBoyutuVarsayilan = 13.0;
+  static const yaziBoyutuEnAz = 11.0;
+  static const yaziBoyutuEnCok = 24.0;
+
+  static Future<double> yaziBoyutuAl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getDouble(_yaziBoyutuKey) ?? yaziBoyutuVarsayilan;
+    return v.clamp(yaziBoyutuEnAz, yaziBoyutuEnCok);
+  }
+
+  static Future<void> yaziBoyutuKaydet(double boyut) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(
+      _yaziBoyutuKey,
+      boyut.clamp(yaziBoyutuEnAz, yaziBoyutuEnCok),
+    );
+  }
 }

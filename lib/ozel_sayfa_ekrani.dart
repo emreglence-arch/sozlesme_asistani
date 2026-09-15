@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'main.dart';
+import 'ayarlar_servisi.dart';
 import 'pdf_goruntuleyici.dart';
 import 'paylas.dart';
 import 'tablo_widget.dart';
@@ -40,11 +42,38 @@ class _Kirinti {
 class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
   late List<_Kirinti> _yol;
   bool _yukleniyor = false;
+  final Set<String> _acikKayitlar = <String>{};
+  double _yaziBoyutu = AyarlarServisi.yaziBoyutuVarsayilan;
 
   @override
   void initState() {
     super.initState();
     _yol = [_Kirinti(null, widget.sayfaAdi)];
+    _yaziBoyutuYukle();
+  }
+
+  Future<void> _yaziBoyutuYukle() async {
+    final b = await AyarlarServisi.yaziBoyutuAl();
+    if (!mounted) return;
+    setState(() => _yaziBoyutu = b);
+  }
+
+  void _yaziBoyutuDegistir(double adim) {
+    final yeni = (_yaziBoyutu + adim).clamp(
+      AyarlarServisi.yaziBoyutuEnAz,
+      AyarlarServisi.yaziBoyutuEnCok,
+    );
+    if (yeni == _yaziBoyutu) return;
+    setState(() => _yaziBoyutu = yeni);
+    AyarlarServisi.yaziBoyutuKaydet(yeni);
+  }
+
+  Future<void> _metniKopyala(String metin) async {
+    await Clipboard.setData(ClipboardData(text: metin));
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Metin panoya kopyalandı')));
   }
 
   String? get _aktifKlasorId => _yol.last.id;
@@ -979,6 +1008,19 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
     );
   }
 
+  Widget _boyutDugmesi(IconData ikon, String ipucu, VoidCallback? onPressed) {
+    return IconButton(
+      tooltip: ipucu,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+      visualDensity: VisualDensity.compact,
+      icon: Icon(ikon, size: 18),
+      color: Colors.grey.shade700,
+      disabledColor: Colors.grey.shade300,
+      onPressed: onPressed,
+    );
+  }
+
   Widget _kayitKarti(
     List<DocumentSnapshot<Map<String, dynamic>>> kayitlar,
     int index,
@@ -992,138 +1034,122 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
     final tarih = (v['tarih'] as Timestamp?)?.toDate();
     final boyut = _boyut(v['boyut'] as int?);
     final dosyaVar = dosyaAdi.isNotEmpty;
+    final acik = _acikKayitlar.contains(d.id);
+    final icerikVar = aciklama.isNotEmpty || dosyaVar;
+
+    final altBilgiler = <String>[
+      if (tarih != null) _tarihMetni(tarih),
+      if (dosyaVar && boyut.isNotEmpty) boyut,
+    ];
 
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: InkWell(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        onTap: dosyaVar ? () => _dosyaAc(v) : null,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 4, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                dosyaVar ? _dosyaIkon(dosyaAdi) : Icons.notes,
-                color: widget.renk,
-                size: 28,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+        side: BorderSide(
+          color: acik ? widget.renk.withOpacity(0.35) : Colors.transparent,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: !icerikVar
+                ? null
+                : () => setState(() {
+                    if (acik) {
+                      _acikKayitlar.remove(d.id);
+                    } else {
+                      _acikKayitlar.add(d.id);
+                    }
+                  }),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: widget.renk.withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      dosyaVar ? _dosyaIkon(dosyaAdi) : Icons.notes,
+                      color: widget.renk,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (etiket.isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: widget.renk.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              etiket,
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w700,
-                                color: widget.renk,
-                              ),
-                            ),
+                        Text(
+                          baslik,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14.5,
                           ),
-                        if (etiket.isNotEmpty && tarih != null)
-                          const SizedBox(width: 8),
-                        if (tarih != null)
-                          Text(
-                            _tarihMetni(tarih),
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              color: Colors.grey.shade600,
-                            ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (etiket.isNotEmpty || altBilgiler.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              if (etiket.isNotEmpty) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: widget.renk.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    etiket,
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: widget.renk,
+                                    ),
+                                  ),
+                                ),
+                                if (altBilgiler.isNotEmpty)
+                                  const SizedBox(width: 8),
+                              ],
+                              if (altBilgiler.isNotEmpty)
+                                Expanded(
+                                  child: Text(
+                                    altBilgiler.join('  •  '),
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
                           ),
+                        ],
                       ],
                     ),
-                    const SizedBox(height: 5),
-                    Text(
-                      baslik,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14.5,
+                  ),
+                  if (icerikVar)
+                    AnimatedRotation(
+                      turns: acik ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(
+                        Icons.expand_more,
+                        size: 22,
+                        color: acik ? widget.renk : Colors.grey.shade500,
                       ),
                     ),
-                    if (aciklama.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        aciklama,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
-                    ],
-                    if (dosyaVar) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        boyut.isEmpty ? dosyaAdi : '$dosyaAdi  •  $boyut',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: Colors.grey.shade500,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Column(
-                children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: 'Yukarı',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 30,
-                          minHeight: 28,
-                        ),
-                        icon: Icon(
-                          Icons.keyboard_arrow_up,
-                          size: 19,
-                          color: index == 0
-                              ? Colors.grey.shade300
-                              : Colors.grey,
-                        ),
-                        onPressed: index == 0
-                            ? null
-                            : () => _kayitTasi(kayitlar, index, -1),
-                      ),
-                      IconButton(
-                        tooltip: 'Aşağı',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 30,
-                          minHeight: 28,
-                        ),
-                        icon: Icon(
-                          Icons.keyboard_arrow_down,
-                          size: 19,
-                          color: index == kayitlar.length - 1
-                              ? Colors.grey.shade300
-                              : Colors.grey,
-                        ),
-                        onPressed: index == kayitlar.length - 1
-                            ? null
-                            : () => _kayitTasi(kayitlar, index, 1),
-                      ),
-                    ],
-                  ),
                   PopupMenuButton<String>(
                     icon: const Icon(
                       Icons.more_vert,
@@ -1133,6 +1159,7 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
                     onSelected: (x) {
                       if (x == 'ac') _dosyaAc(v);
                       if (x == 'indir') _dosyaIndir(v);
+                      if (x == 'kopyala') _metniKopyala(aciklama);
                       if (x == 'paylas') {
                         final url = (v['url'] ?? '').toString();
                         Paylas.menu(
@@ -1151,6 +1178,11 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
                           value: 'indir',
                           child: Text('İndir'),
                         ),
+                      if (aciklama.isNotEmpty)
+                        const PopupMenuItem(
+                          value: 'kopyala',
+                          child: Text('Metni kopyala'),
+                        ),
                       const PopupMenuItem(
                         value: 'paylas',
                         child: Text('Paylaş'),
@@ -1164,9 +1196,160 @@ class _OzelSayfaEkraniState extends State<OzelSayfaEkrani> {
                   ),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 200),
+            sizeCurve: Curves.easeInOut,
+            crossFadeState: acik && icerikVar
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            firstChild: const SizedBox(width: double.infinity),
+            secondChild: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Divider(height: 1, color: Colors.grey.shade200),
+                  if (aciklama.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        _boyutDugmesi(
+                          Icons.text_decrease,
+                          'Yazıyı küçült',
+                          _yaziBoyutu > AyarlarServisi.yaziBoyutuEnAz
+                              ? () => _yaziBoyutuDegistir(-1)
+                              : null,
+                        ),
+                        SizedBox(
+                          width: 28,
+                          child: Text(
+                            _yaziBoyutu.toStringAsFixed(0),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ),
+                        _boyutDugmesi(
+                          Icons.text_increase,
+                          'Yazıyı büyüt',
+                          _yaziBoyutu < AyarlarServisi.yaziBoyutuEnCok
+                              ? () => _yaziBoyutuDegistir(1)
+                              : null,
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.grey.shade700,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          icon: const Icon(Icons.copy_all_outlined, size: 16),
+                          label: const Text(
+                            'Kopyala',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          onPressed: () => _metniKopyala(aciklama),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      aciklama,
+                      style: TextStyle(
+                        fontSize: _yaziBoyutu,
+                        height: 1.45,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                  ] else
+                    const SizedBox(height: 10),
+                  if (dosyaVar) ...[
+                    if (aciklama.isNotEmpty) const SizedBox(height: 10),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => _dosyaAc(v),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppRenk.amber.withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _dosyaIkon(dosyaAdi),
+                              size: 18,
+                              color: AppRenk.amber,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                boyut.isEmpty
+                                    ? dosyaAdi
+                                    : '$dosyaAdi  •  $boyut',
+                                style: const TextStyle(fontSize: 12.5),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Icon(
+                              Icons.open_in_new,
+                              size: 16,
+                              color: Colors.grey.shade600,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.grey.shade700,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: const Icon(Icons.keyboard_arrow_up, size: 18),
+                        label: const Text(
+                          'Yukarı taşı',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        onPressed: index == 0
+                            ? null
+                            : () => _kayitTasi(kayitlar, index, -1),
+                      ),
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.grey.shade700,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                        label: const Text(
+                          'Aşağı taşı',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        onPressed: index == kayitlar.length - 1
+                            ? null
+                            : () => _kayitTasi(kayitlar, index, 1),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
